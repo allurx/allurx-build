@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, copyFile, readdir, readFile, writeFile, rm, stat } from
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createGithub, validateTag } from './github.js';
-import { inspectBundle, readModel, verifyPublic, verifySignatures, type Model } from './artifacts.js';
+import { inspectBundle, readModel, verifyPublic, verifySignatures, type Manifest, type Model } from './artifacts.js';
 import { asObject, assert, env, int, output, readJson, request, run, sha256, str, stream, writeJson, type JsonObject } from './util.js';
 
 interface Plan {
@@ -66,8 +66,6 @@ async function publicationPlan(api: Github, directory: string): Promise<Plan> {
   const commit = await run('git', ['rev-parse', 'HEAD']);
   assert(commit === remote.commit, 'Checkout does not match the annotated tag');
   await api.noDuplicateRun(runId, tag, commit);
-  const notes = join('docs', 'releases', `${tag}.md`);
-  assert(await exists(notes) && (await readFile(notes, 'utf8')).trim().length > 0, `Commit reviewed notes at ${notes}`);
   await run('git', ['fetch', '--no-tags', 'origin', 'main']);
   await run('git', ['merge-base', '--is-ancestor', commit, 'FETCH_HEAD']);
   const ci = await api.exactCi(commit);
@@ -157,6 +155,30 @@ async function deploy(api: Github, directory: string, plan: Plan): Promise<void>
   assert(result === 0 && evidence.state === 'PUBLISHED', 'Publication is not fully confirmed; inspect the existing deployment and evidence without redeploying');
 }
 
+function releaseReport(plan: Plan, contents: Manifest, verification: JsonObject, evidence: JsonObject, planHash: string): JsonObject {
+  return {
+    schemaVersion: 1,
+    release: { repository: plan.repository, tag: plan.tag, version: plan.version, commit: plan.commit, tagObject: plan.tagObject },
+    provenance: {
+      runId: plan.runId, runAttempt: plan.runAttempt, sharedWorkflowSha: plan.sharedWorkflowSha, ci: plan.ci,
+      outputTimestamp: plan.outputTimestamp, planSha256: planHash, effectivePomSha256: contents.effectivePomSha256,
+    },
+    publication: {
+      deploymentId: str(evidence, 'deploymentId'), deploymentName: plan.deploymentName, state: str(evidence, 'state'),
+      repository: str(verification, 'repository'), bundleSha256: contents.bundleSha256,
+    },
+    signing: { fingerprint: plan.signingFingerprint, publicKey: 'signing-public-key.asc' },
+    artifacts: {
+      modules: contents.modules.map(({ groupId, artifactId, packaging }) => ({ groupId, artifactId, packaging })),
+      files: contents.files,
+    },
+    verification: {
+      verified: verification.verified, bodyCount: verification.bodyCount, fileCount: verification.fileCount,
+      verifiedSignatures: verification.verifiedSignatures, externalParents: verification.externalParents,
+    },
+  };
+}
+
 async function finish(api: Github, directory: string, plan: Plan): Promise<void> {
   const evidence = await readJson(join(directory, 'release-evidence.json'));
   const planHash = await sha256(join(directory, 'release-plan.json'));
@@ -168,31 +190,37 @@ async function finish(api: Github, directory: string, plan: Plan): Promise<void>
     const report = await verifyPublic(join(directory, 'bundle.zip'), contents, plan.signingFingerprint, keyring);
     assert(report.verified === true, 'Public verification was unsuccessful');
     await writeJson(join(directory, 'public-verification.json'), { ...report, planSha256: planHash });
+    // Omit finish-run metadata so unchanged evidence and verification reproduce the same bytes.
+    await writeJson(join(directory, 'release-report.json'), releaseReport(plan, contents, report, evidence, planHash));
   } finally { await rm(keyring, { recursive: true, force: true }); }
   await validatePlan(await readJson(join(directory, 'release-plan.json')), api);
   const marker = `<!-- allurx-build commit=${plan.commit} tag-object=${plan.tagObject} -->`;
   let release = await api.optional(`/releases/tags/${plan.tag}`);
   if (!release) {
-    assert(await run('git', ['rev-parse', 'HEAD']) === plan.commit, 'Release notes require the original checkout');
-    const notes = (await readFile(join('docs', 'releases', `${plan.tag}.md`), 'utf8')).trim();
-    assert(notes.length > 0, 'Reviewed release notes are required');
+    // GitHub prepends this body to the generated notes, preserving the release identity marker.
     release = await api.post('/releases', { tag_name: plan.tag, target_commitish: plan.commit, name: plan.tag,
-      body: `${notes}\n\n${marker}`, draft: false, prerelease: false, make_latest: 'legacy' });
+      body: `${marker}\n\n`, generate_release_notes: true, draft: false, prerelease: false, make_latest: 'legacy' });
   } else {
     assert(str(release, 'tag_name') === plan.tag && release.draft === false && release.prerelease === false
       && str(release, 'body').includes(marker), 'Existing Release differs; manual review is required');
   }
   const assets = await api.pages(`/releases/${int(release, 'id')}/assets`);
-  for (const name of ['release-plan.json', 'manifest.json', 'public-verification.json', 'signing-public-key.asc']) {
+  const legacy = new Set(['release-plan.json', 'manifest.json', 'public-verification.json']);
+  assert(!assets.some(asset => legacy.has(str(asset, 'name'))),
+    'Existing Release uses legacy evidence assets; preserve them and use the original shared workflow SHA to handle the original publication without redeploying');
+  const missing: { name: string; data: Uint8Array }[] = [];
+  for (const name of ['release-report.json', 'signing-public-key.asc']) {
     const matching = assets.filter(asset => str(asset, 'name') === name);
     const data = await readFile(join(directory, name));
     if (matching.length) {
       assert(matching.length === 1 && matching[0] && str(matching[0], 'digest') === `sha256:${await sha256(data)}`, `Existing Release asset differs: ${name}`);
-    } else {
-      const url = str(release, 'upload_url').split('{')[0];
-      assert(url, 'Missing Release upload URL');
-      await api.upload(`${url}?name=${encodeURIComponent(name)}`, data);
-    }
+    } else missing.push({ name, data });
+  }
+  // Check all existing attachments before adding any missing one.
+  for (const { name, data } of missing) {
+    const url = str(release, 'upload_url').split('{')[0];
+    assert(url, 'Missing Release upload URL');
+    await api.upload(`${url}?name=${encodeURIComponent(name)}`, data);
   }
   await output('release-url', str(release, 'html_url'));
 }
