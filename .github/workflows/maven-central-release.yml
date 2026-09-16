@@ -1,0 +1,234 @@
+name: Maven Central release
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: publish once, or recover an existing deployment without deploying
+        type: string
+        default: publish
+      tag:
+        description: Existing annotated vX.Y.Z tag
+        type: string
+        default: ''
+      source-run-id:
+        description: Original publish run ID; required in recover mode
+        type: string
+        default: ''
+      source-run-attempt:
+        description: Original publish run attempt; required in recover mode
+        type: string
+        default: ''
+      deployment-id:
+        description: Existing Central deployment ID when automatic evidence is incomplete
+        type: string
+        default: ''
+    outputs:
+      version:
+        description: Validated Maven release version
+        value: ${{ jobs.publish.outputs.version }}
+      commit:
+        description: Release commit verified against the annotated tag and CI
+        value: ${{ jobs.publish.outputs.commit }}
+      release-url:
+        description: Verified GitHub Release URL
+        value: ${{ jobs.finish.outputs.release-url }}
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish or recover Central deployment
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: maven-central
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      commit: ${{ steps.prepare.outputs.commit }}
+      artifact: release-evidence-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: project
+    env:
+      RELEASE_MODE: ${{ inputs.mode }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+      SOURCE_RUN_ATTEMPT: ${{ inputs.source-run-attempt }}
+      DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+      RELEASE_GPG_FINGERPRINT: ${{ vars.GPG_FINGERPRINT }}
+    steps:
+      - name: Resolve shared workflow revision
+        id: shared
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_API_URL" = https://api.github.com
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' | jq -er \
+            --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg path 'allurx/allurx-build/.github/workflows/maven-central-release.yml' '
+            select(.id == $run and .run_attempt == $attempt)
+            | [.referenced_workflows[]? | select((.path | split("@")[0]) == $path)]
+            | if length == 1 and (.[0].sha | test("^[0-9a-f]{40}$"))
+              then .[0].sha else error("Expected one immutable shared workflow revision") end')"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Checkout shared build tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: allurx/allurx-build
+          ref: ${{ steps.shared.outputs.sha }}
+          path: .allurx-build
+          persist-credentials: false
+      - name: Checkout release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          path: project
+          persist-credentials: false
+      - name: Set up build tools
+        id: tools
+        uses: ./.allurx-build/.github/actions/setup
+        with:
+          maven: ${{ inputs.mode == 'publish' }}
+      - name: Validate tag, CI and recovery provenance
+        id: prepare
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release-data
+          GH_TOKEN: ${{ github.token }}
+          SHARED_WORKFLOW_SHA: ${{ steps.shared.outputs.sha }}
+        run: node "${{ steps.tools.outputs.cli }}" prepare
+      - name: Persist release plan before any upload to Central
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-plan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-data/release-plan.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Import signing key
+        if: inputs.mode == 'publish'
+        env:
+          GNUPGHOME: ${{ runner.temp }}/release-gnupg
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          install -d -m 700 "$GNUPGHOME"
+          printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+      - name: Deploy once and wait for publication
+        if: inputs.mode == 'publish'
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release-data
+          GNUPGHOME: ${{ runner.temp }}/release-gnupg
+          GH_TOKEN: ${{ github.token }}
+          SHARED_WORKFLOW_SHA: ${{ steps.shared.outputs.sha }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: node "${{ steps.tools.outputs.cli }}" deploy
+      - name: Resume existing deployment without deploying
+        if: inputs.mode == 'recover'
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release-data
+          GH_TOKEN: ${{ github.token }}
+          SHARED_WORKFLOW_SHA: ${{ steps.shared.outputs.sha }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+        run: node "${{ steps.tools.outputs.cli }}" recover
+      - name: Retain bundle even after an interrupted deploy
+        if: always() && steps.prepare.outcome == 'success'
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release-data
+        run: |
+          if [[ -f "$RELEASE_DIR/bundle.zip" ]]; then exit 0; fi
+          mapfile -d '' bundles < <(find . -type f -path '*/target/central-publishing/central-bundle.zip' -print0)
+          if (( ${#bundles[@]} > 1 )); then
+            echo '::error::Expected at most one complete reactor Central bundle'
+            exit 1
+          fi
+          if (( ${#bundles[@]} == 1 )); then cp -- "${bundles[0]}" "$RELEASE_DIR/bundle.zip"; fi
+      - name: Preserve release evidence on success or failure
+        if: always() && steps.prepare.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-evidence-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-data/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove ephemeral signing keyring
+        if: always()
+        working-directory: .
+        run: |
+          test -n "$RUNNER_TEMP" && test -d "$RUNNER_TEMP"
+          rm -rf -- "$RUNNER_TEMP/release-gnupg"
+
+  finish:
+    name: Verify public artifacts and create GitHub Release
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      release-url: ${{ steps.release.outputs.release-url }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: project
+    steps:
+      - name: Resolve shared workflow revision
+        id: shared
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_API_URL" = https://api.github.com
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' | jq -er \
+            --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg path 'allurx/allurx-build/.github/workflows/maven-central-release.yml' '
+            select(.id == $run and .run_attempt == $attempt)
+            | [.referenced_workflows[]? | select((.path | split("@")[0]) == $path)]
+            | if length == 1 and (.[0].sha | test("^[0-9a-f]{40}$"))
+              then .[0].sha else error("Expected one immutable shared workflow revision") end')"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Checkout shared build tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: allurx/allurx-build
+          ref: ${{ steps.shared.outputs.sha }}
+          path: .allurx-build
+          persist-credentials: false
+      - name: Checkout verified release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.publish.outputs.commit }}
+          path: project
+          persist-credentials: false
+      - name: Set up build tools
+        id: tools
+        uses: ./.allurx-build/.github/actions/setup
+      - name: Download producing attempt's release evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publish.outputs.artifact }}
+          path: ${{ runner.temp }}/release-data
+      - name: Verify published files and create GitHub Release
+        id: release
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release-data
+          GH_TOKEN: ${{ github.token }}
+          SHARED_WORKFLOW_SHA: ${{ steps.shared.outputs.sha }}
+        run: node "${{ steps.tools.outputs.cli }}" finish
+      - name: Preserve public verification
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-data/public-verification.json
+          if-no-files-found: ignore
+          retention-days: 90

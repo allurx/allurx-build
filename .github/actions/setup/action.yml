@@ -1,0 +1,51 @@
+name: Set up allurx-build
+description: Build the Node.js release CLI and optionally install the pinned JDK and Maven.
+inputs:
+  maven:
+    description: Install the JDK and Maven for building a Java project
+    default: 'false'
+outputs:
+  cli:
+    description: Absolute path to the release CLI
+    value: ${{ steps.build.outputs.cli }}
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 26.8.2
+        check-latest: false
+        package-manager-cache: false
+    - name: Set up Java and Maven settings
+      if: inputs.maven == 'true'
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      with:
+        distribution: temurin
+        java-version: 25.0.4.1+1
+        check-latest: false
+        server-id: central
+        server-username-env-var: CENTRAL_USERNAME
+        server-password-env-var: CENTRAL_PASSWORD
+    - name: Install verified Apache Maven
+      if: inputs.maven == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/apache-maven-3.9.16-bin.tar.gz"
+        curl -fsSL --retry 3 --output "$archive" \
+          https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/apache-maven-3.9.16-bin.tar.gz
+        echo "831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6  $archive" | sha512sum --check
+        tar -xzf "$archive" -C "$RUNNER_TEMP"
+        echo "$RUNNER_TEMP/apache-maven-3.9.16/bin" >> "$GITHUB_PATH"
+        rm -- "$archive"
+    - name: Build release tool
+      id: build
+      shell: bash
+      run: |
+        root="$(realpath "$GITHUB_ACTION_PATH/../../..")"
+        cd "$root"
+        npm install --global --ignore-scripts --no-audit --no-fund "$(node -p 'require("./package.json").packageManager')"
+        npm ci --ignore-scripts
+        npm run build
+        echo "cli=$root/dist/release.js" >> "$GITHUB_OUTPUT"

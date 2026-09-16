@@ -1,0 +1,24 @@
+{
+  "name": "allurx-build",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared Maven CI and Central release tooling",
+  "packageManager": "npm@12.0.2",
+  "engines": {
+    "node": ">=26.8.2 <27",
+    "npm": "12.0.2"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.1",
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.1",
+    "typescript": "7.0.2"
+  }
+}

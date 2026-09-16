@@ -1,0 +1,65 @@
+name: Maven CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    name: Maven verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Resolve shared workflow revision
+        id: shared
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$GITHUB_API_URL" = https://api.github.com
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --header 'X-GitHub-Api-Version: 2026-03-10' | jq -er \
+            --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg path 'allurx/allurx-build/.github/workflows/maven-ci.yml' '
+            select(.id == $run and .run_attempt == $attempt)
+            | [.referenced_workflows[]? | select((.path | split("@")[0]) == $path)]
+            | if length == 1 and (.[0].sha | test("^[0-9a-f]{40}$"))
+              then .[0].sha else error("Expected one immutable shared workflow revision") end')"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Checkout shared build tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: allurx/allurx-build
+          ref: ${{ steps.shared.outputs.sha }}
+          path: .allurx-build
+          persist-credentials: false
+      - name: Checkout project
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: project
+          persist-credentials: false
+      - name: Set up build tools
+        uses: ./.allurx-build/.github/actions/setup
+        with:
+          maven: 'true'
+      - name: Verify release contents without signing
+        working-directory: project
+        run: |
+          timestamp="$(git show -s --format=%ct HEAD)"
+          mvn -B -ntp -Prelease -Dgpg.skip=true \
+            "-Dproject.build.outputTimestamp=$timestamp" clean verify
+      - name: Preserve build reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maven-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            project/**/target/surefire-reports/**
+            project/**/target/failsafe-reports/**
+          if-no-files-found: ignore
+          retention-days: 14
