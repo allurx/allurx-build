@@ -6,8 +6,9 @@
 
 - tag 为 `vMAJOR.MINOR.PATCH`，各段除 `0` 外不以零开头，不接受后缀；所有模块版本等于去掉 `v` 的 tag 版本，坐标不能重复。
 - 仅支持 `pom`、`jar` packaging，不支持 SNAPSHOT、局部 reactor、额外 classifier 或 `test-jar`；不能用 `-N`、`-pl` 或排除模块。
-- effective POM 中除 `profiles`、`properties` 子树外，所有 `version` 必须是固定稳定版本，包括父 POM、依赖、插件及管理配置；激活 profile 后进入生效模型的内容也会检查。
-- 固定版本接受数字分段及可选的 `Final`、`GA`、`RELEASE`、`SP数字` 后缀（以 `.` 或 `-` 连接，大小写不敏感）。不接受 SNAPSHOT、RC/beta、范围、`LATEST`、单独的 `RELEASE` 或未解析变量。
+- 自身发布版本始终为上述严格的 `MAJOR.MINOR.PATCH`，所有 reactor 模块保持一致；制品模型和 bundle 核验也执行此限制。
+- effective POM 中除 `profiles`、`properties` 子树外，第三方依赖、父 POM、插件及管理配置的 `version` 必须非空、无空白、已解析，且为固定非 SNAPSHOT 版本；激活 profile 后进入生效模型的内容也会检查。拒绝 `LATEST`、单独的 `RELEASE`、版本范围、通配符、未解析变量、`SNAPSHOT` 和 Maven 时间戳快照。
+- 第三方固定版本不使用后缀白名单；是否采用预发布依赖由调用方决定。用于下载父 POM 的坐标仍须通过路径安全检查。
 
 ## release profile
 

@@ -45,8 +45,14 @@ function xml(data: Uint8Array, label: string): Xml {
   return object(new XMLParser({ ignoreAttributes: true, removeNSPrefix: true, parseTagValue: false, processEntities: false }).parse(source));
 }
 
-function stable(version: string): void {
-  assert(version === version.trim() && /^[0-9]+(?:\.[0-9]+)*(?:[.-](?:Final|GA|RELEASE|SP[0-9]+))?$/i.test(version), `Expected a fixed stable version: ${version}`);
+function releaseVersion(version: string): void {
+  assert(version === version.trim() && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version), `Expected a stable MAJOR.MINOR.PATCH release version: ${version}`);
+}
+
+function fixedVersion(version: string): void {
+  assert(Boolean(version) && version === version.trim() && !/[\s\[\](),*]/.test(version)
+    && !version.includes('${') && !/^(?:LATEST|RELEASE)$/i.test(version)
+    && !/(?:SNAPSHOT|-\d{8}\.\d{6}-\d+)$/i.test(version), `Expected a fixed non-SNAPSHOT version: ${version}`);
 }
 
 function interpolate(value: string, properties: Record<string, string>): string {
@@ -87,7 +93,8 @@ function bodyPaths(module: Coordinates & { packaging: string }): string[] {
   for (const coordinate of [module.groupId, module.artifactId]) {
     assert(coordinate === coordinate.trim() && /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(coordinate) && coordinate.split('.').every(p => p !== '' && p !== '.' && p !== '..'), `Invalid Maven coordinate: ${coordinate}`);
   }
-  stable(module.version);
+  fixedVersion(module.version);
+  assert(!/[\\/:?#%\x00-\x20\x7f]/.test(module.version) && !['.', '..'].includes(module.version), `Unsafe Maven version path: ${module.version}`);
   const base = `${module.groupId.replaceAll('.', '/')}/${module.artifactId}/${module.version}/${module.artifactId}-${module.version}`;
   assert(['pom', 'jar'].includes(module.packaging), `Unsupported packaging: ${module.packaging}`);
   return module.packaging === 'pom' ? [`${base}.pom`] : [`.pom`, `.jar`, `-sources.jar`, `-javadoc.jar`].map(s => base + s);
@@ -157,7 +164,7 @@ function checkPublisher(project: Xml, deploymentName: string): void {
 
 /** Parse the complete effective reactor before release credentials become available. */
 export async function readModel(effectivePath: string, version: string, deploymentName: string): Promise<Model> {
-  stable(version);
+  releaseVersion(version);
   const data = await readFile(effectivePath), root = xml(data, effectivePath);
   assert(Object.hasOwn(root, 'project') || Object.hasOwn(root, 'projects'), 'Expected effective POM project/projects root');
   const projects = Object.hasOwn(root, 'project') ? elements(root, 'project') : elements(root, 'projects/project');
@@ -172,7 +179,7 @@ export async function readModel(effectivePath: string, version: string, deployme
     const versions = (value: unknown): void => {
       if (Array.isArray(value)) return value.forEach(versions);
       for (const [key, item] of Object.entries(object(value))) {
-        if (key === 'version') { assert(typeof item === 'string', `Invalid version: ${label}`); stable(item); }
+        if (key === 'version') { assert(typeof item === 'string', `Invalid version: ${label}`); fixedVersion(item); }
         else versions(item);
       }
     };
@@ -272,7 +279,7 @@ function checkJar(data: Uint8Array, path: string): void {
 /** Bind actual signed ZIP bytes to every expected reactor component. */
 export async function inspectBundle(bundlePath: string, model: Model): Promise<Manifest> {
   assert(model.schemaVersion === 1 && model.modules?.length > 0, 'Unsupported or empty reactor model');
-  stable(model.version);
+  releaseVersion(model.version);
   const bodies = new Map<string, Module>();
   for (const module of model.modules) {
     assert(module.version === model.version, 'Mixed reactor versions');
