@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, copyFile, readdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { createGithub, sharedSha, validateTag } from './github.js';
+import { createGithub, validateTag } from './github.js';
 import { inspectBundle, readModel, verifyPublic, verifySignatures, type Model } from './artifacts.js';
 import { asObject, assert, env, int, output, readJson, request, run, sha256, str, stream, writeJson, type JsonObject } from './util.js';
 
@@ -40,7 +40,7 @@ async function validatePlan(value: JsonObject, api: Github): Promise<Plan> {
   assert(validateTag(str(value, 'tag')) === str(value, 'version'), 'Plan tag/version mismatch');
   for (const field of ['commit', 'tagObject', 'sharedWorkflowSha'])
     assert(str(value, field).length === 40 && /^[a-f0-9]{40}$/.test(str(value, field)), `Invalid plan SHA: ${field}`);
-  assert(str(value, 'sharedWorkflowSha') === env('SHARED_WORKFLOW_SHA'), 'Recovery requires the original shared workflow SHA');
+  assert(str(value, 'sharedWorkflowSha') === env('SHARED_WORKFLOW_SHA'), 'Release plan requires the original shared workflow SHA');
   assert([40, 64].includes(str(value, 'signingFingerprint').length) && /^(?:[A-F0-9]{40}|[A-F0-9]{64})$/.test(str(value, 'signingFingerprint')), 'Invalid signing fingerprint');
   assert(/^\d+$/.test(str(value, 'outputTimestamp')) && str(value, 'deploymentName').length > 0, 'Invalid release metadata');
   assert(int(value, 'runId') > 0 && int(value, 'runAttempt') > 0, 'Invalid original run');
@@ -48,7 +48,7 @@ async function validatePlan(value: JsonObject, api: Github): Promise<Plan> {
   asObject(value.ci);
   const remote = await api.tag(str(value, 'tag'));
   assert(remote.commit === str(value, 'commit') && remote.tagObject === str(value, 'tagObject'), 'Remote tag moved after planning');
-  // The model is checked against the complete original bundle before any use in recovery.
+  // Manifest generation checks the saved model against the complete retained bundle.
   return value as unknown as Plan;
 }
 
@@ -89,42 +89,6 @@ async function publicationPlan(api: Github, directory: string): Promise<Plan> {
   };
 }
 
-async function recoveryPlan(api: Github, directory: string): Promise<Plan> {
-  assert(env('GITHUB_EVENT_NAME') === 'workflow_dispatch' && env('GITHUB_REF') === 'refs/heads/main', 'Recovery must be dispatched from main');
-  const tag = env('RELEASE_TAG');
-  validateTag(tag);
-  const source = Number(env('SOURCE_RUN_ID'));
-  const attempt = Number(env('SOURCE_RUN_ATTEMPT'));
-  assert(Number.isSafeInteger(source) && source > 0 && Number.isSafeInteger(attempt) && attempt > 0
-    && source !== Number(env('GITHUB_RUN_ID')), 'Invalid original run/attempt');
-  const original = await api.get(`/actions/runs/${source}/attempts/${attempt}`);
-  assert(int(original, 'id') === source && int(original, 'run_attempt') === attempt && str(original, 'event') === 'push'
-    && str(original, 'head_branch') === tag && str(original, 'path') === '.github/workflows/release.yml'
-    && str(original, 'status') === 'completed', 'Original tag-push release attempt is not confirmed');
-  await api.artifact(source, `release-plan-${attempt}`, directory);
-  const plan = await validatePlan(await readJson(join(directory, 'release-plan.json')), api);
-  assert(plan.runId === source && plan.runAttempt === attempt && plan.tag === tag && plan.commit === str(original, 'head_sha')
-    && plan.sharedWorkflowSha === sharedSha(original, 'maven-central-release.yml'), 'Original run and plan provenance differ');
-  const temporary = await mkdtemp(join(tmpdir(), 'allurx-evidence-'));
-  try {
-    await api.artifact(source, `release-evidence-${attempt}`, temporary);
-    assert(await sha256(join(temporary, 'release-plan.json')) === await sha256(join(directory, 'release-plan.json')), 'Persisted plans disagree');
-    for (const name of ['release-evidence.json', 'bundle.zip', 'signing-public-key.asc']) {
-      assert(await exists(join(temporary, name)), `Original evidence is missing: ${name}`);
-      await copyFile(join(temporary, name), join(directory, name));
-    }
-  } finally { await rm(temporary, { recursive: true, force: true }); }
-  const evidenceFile = join(directory, 'release-evidence.json');
-  const evidence = await readJson(evidenceFile);
-  const supplied = env('DEPLOYMENT_ID', '');
-  const recorded = str(evidence, 'deploymentId');
-  assert(!supplied || !recorded || supplied === recorded, 'Deployment ID conflicts with original evidence');
-  const identifier = supplied || recorded;
-  assert(deployId.test(identifier), 'Find the original deployment UUID before recovering');
-  await writeJson(evidenceFile, { ...evidence, deploymentId: identifier });
-  return plan;
-}
-
 async function manifest(plan: Plan, directory: string) {
   const bundle = join(directory, 'bundle.zip');
   if (!await exists(bundle)) {
@@ -152,7 +116,7 @@ async function deploymentStatus(plan: Plan, identifier: string, seconds: number)
     const state = str(status, 'deploymentState');
     if (state === 'PUBLISHED') return status;
     assert(['PENDING', 'VALIDATING', 'PUBLISHING'].includes(state), `Central state requires investigation: ${state}`);
-    assert(Date.now() < deadline, `Central is still ${state}; recover this same deployment later`);
+    assert(Date.now() < deadline, `Central is still ${state}; inspect the existing deployment before taking further action`);
     await new Promise(resolve => setTimeout(resolve, Math.min(10_000, deadline - Date.now())));
   }
 }
@@ -190,16 +154,7 @@ async function deploy(api: Github, directory: string, plan: Plan): Promise<void>
       evidence.centralStatus = status;
     }
   } finally { await writeJson(evidenceFile, evidence); }
-  assert(result === 0 && evidence.state === 'PUBLISHED', 'Publication is not fully confirmed; recover without redeploying');
-}
-
-async function recover(directory: string, plan: Plan): Promise<void> {
-  const file = join(directory, 'release-evidence.json');
-  const evidence = await readJson(file);
-  assert(str(evidence, 'planSha256') === await sha256(join(directory, 'release-plan.json')), 'Evidence and original plan differ');
-  await manifest(plan, directory);
-  const status = await deploymentStatus(plan, str(evidence, 'deploymentId'), 1800);
-  await writeJson(file, { ...evidence, state: 'PUBLISHED', centralStatus: status });
+  assert(result === 0 && evidence.state === 'PUBLISHED', 'Publication is not fully confirmed; inspect the existing deployment and evidence without redeploying');
 }
 
 async function finish(api: Github, directory: string, plan: Plan): Promise<void> {
@@ -245,24 +200,21 @@ async function finish(api: Github, directory: string, plan: Plan): Promise<void>
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (process.argv.length === 2 || command === '--help' && process.argv.length === 3) {
-    console.log('allurx-build: prepare | deploy | recover | finish\nGitHub Actions release tool; configuration uses environment variables.');
+    console.log('allurx-build: prepare | deploy | finish\nGitHub Actions release tool; configuration uses environment variables.');
     return;
   }
-  assert(process.argv.length === 3 && command && ['prepare', 'deploy', 'recover', 'finish'].includes(command), 'Expected prepare, deploy, recover or finish');
+  assert(process.argv.length === 3 && command && ['prepare', 'deploy', 'finish'].includes(command), 'Expected prepare, deploy or finish');
   const api = createGithub();
   const directory = resolve(env('RELEASE_DIR'));
   await mkdir(directory, { recursive: true });
   if (command === 'prepare') {
-    const mode = env('RELEASE_MODE', 'publish');
-    assert(mode === 'publish' || mode === 'recover', 'Unsupported release mode');
-    const plan = mode === 'publish' ? await publicationPlan(api, directory) : await recoveryPlan(api, directory);
+    const plan = await publicationPlan(api, directory);
     await writeJson(join(directory, 'release-plan.json'), plan);
     await output('version', plan.version);
     await output('commit', plan.commit);
   } else {
     const plan = await validatePlan(await readJson(join(directory, 'release-plan.json')), api);
     if (command === 'deploy') await deploy(api, directory, plan);
-    else if (command === 'recover') await recover(directory, plan);
     else await finish(api, directory, plan);
   }
 }

@@ -3,24 +3,8 @@ name: Maven Central release
 on:
   workflow_call:
     inputs:
-      mode:
-        description: publish once, or recover an existing deployment without deploying
-        type: string
-        default: publish
       tag:
         description: Existing annotated vX.Y.Z tag
-        type: string
-        default: ''
-      source-run-id:
-        description: Original publish run ID; required in recover mode
-        type: string
-        default: ''
-      source-run-attempt:
-        description: Original publish run attempt; required in recover mode
-        type: string
-        default: ''
-      deployment-id:
-        description: Existing Central deployment ID when automatic evidence is incomplete
         type: string
         default: ''
     outputs:
@@ -38,7 +22,7 @@ permissions: {}
 
 jobs:
   publish:
-    name: Publish or recover Central deployment
+    name: Publish to Maven Central
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     environment: maven-central
@@ -54,11 +38,7 @@ jobs:
         shell: bash
         working-directory: project
     env:
-      RELEASE_MODE: ${{ inputs.mode }}
       RELEASE_TAG: ${{ inputs.tag }}
-      SOURCE_RUN_ID: ${{ inputs.source-run-id }}
-      SOURCE_RUN_ATTEMPT: ${{ inputs.source-run-attempt }}
-      DEPLOYMENT_ID: ${{ inputs.deployment-id }}
       RELEASE_GPG_FINGERPRINT: ${{ vars.GPG_FINGERPRINT }}
     steps:
       - name: Resolve shared workflow revision
@@ -95,8 +75,8 @@ jobs:
         id: tools
         uses: ./.allurx-build/.github/actions/setup
         with:
-          maven: ${{ inputs.mode == 'publish' }}
-      - name: Validate tag, CI and recovery provenance
+          maven: 'true'
+      - name: Validate tag, CI and release provenance
         id: prepare
         env:
           RELEASE_DIR: ${{ runner.temp }}/release-data
@@ -111,7 +91,6 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - name: Import signing key
-        if: inputs.mode == 'publish'
         env:
           GNUPGHOME: ${{ runner.temp }}/release-gnupg
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -119,7 +98,6 @@ jobs:
           install -d -m 700 "$GNUPGHOME"
           printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
       - name: Deploy once and wait for publication
-        if: inputs.mode == 'publish'
         env:
           RELEASE_DIR: ${{ runner.temp }}/release-data
           GNUPGHOME: ${{ runner.temp }}/release-gnupg
@@ -129,15 +107,6 @@ jobs:
           CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
           MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: node "${{ steps.tools.outputs.cli }}" deploy
-      - name: Resume existing deployment without deploying
-        if: inputs.mode == 'recover'
-        env:
-          RELEASE_DIR: ${{ runner.temp }}/release-data
-          GH_TOKEN: ${{ github.token }}
-          SHARED_WORKFLOW_SHA: ${{ steps.shared.outputs.sha }}
-          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
-          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
-        run: node "${{ steps.tools.outputs.cli }}" recover
       - name: Retain bundle even after an interrupted deploy
         if: always() && steps.prepare.outcome == 'success'
         env:

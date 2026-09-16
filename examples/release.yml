@@ -2,23 +2,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Original annotated version tag
-        required: true
-        type: string
-      source-run-id:
-        description: Original publish run ID
-        required: true
-        type: string
-      source-run-attempt:
-        description: Original publish attempt
-        required: true
-        type: string
-      deployment-id:
-        description: Original deployment UUID, if missing from evidence
-        type: string
 permissions:
   contents: read
 concurrency:
@@ -32,8 +15,4 @@ jobs:
       actions: read
     uses: allurx/allurx-build/.github/workflows/maven-central-release.yml@<SHA>
     with:
-      mode: ${{ github.event_name == 'workflow_dispatch' && 'recover' || 'publish' }}
-      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      source-run-id: ${{ inputs.source-run-id || '' }}
-      source-run-attempt: ${{ inputs.source-run-attempt || '' }}
-      deployment-id: ${{ inputs.deployment-id || '' }}
+      tag: ${{ github.ref_name }}

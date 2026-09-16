@@ -8,15 +8,6 @@ export function validateTag(tag: string): string {
   return tag.slice(1);
 }
 
-export function sharedSha(attempt: JsonObject, workflow: string): string {
-  const expected = `allurx/allurx-build/.github/workflows/${workflow}`;
-  const matches = asArray(attempt.referenced_workflows ?? []).map(asObject)
-    .filter(value => str(value, 'path').split('@', 1)[0] === expected);
-  const sha = matches.length === 1 ? str(matches[0]!, 'sha') : '';
-  assert(sha.length === 40 && /^[0-9a-f]{40}$/.test(sha), `Expected exactly one immutable reference to ${expected}`);
-  return sha;
-}
-
 export function createGithub(repository = env('GITHUB_REPOSITORY'), token = env('GH_TOKEN', '') || env('GITHUB_TOKEN', '')) {
   assert(repository === repository.trim() && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository), 'Invalid GitHub repository');
   const root = `https://api.github.com/repos/${repository}`;
@@ -97,7 +88,7 @@ export function createGithub(repository = env('GITHUB_REPOSITORY'), token = env(
         .flatMap(job => asArray(job.steps ?? []).map(asObject))
         .filter(step => str(step, 'name') === 'Deploy once and wait for publication');
       assert(steps.length === 1 && str(steps[0]!, 'conclusion') === 'skipped',
-        'A previous deploy was entered or cannot be ruled out; use recovery');
+        'A previous deploy was entered or cannot be ruled out; inspect the existing deployment and evidence without redeploying');
     }
   }
 
