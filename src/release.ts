@@ -75,7 +75,7 @@ async function publicationPlan(api: Github, directory: string): Promise<Plan> {
   assert(shared.length === 40 && /^[a-f0-9]{40}$/.test(shared), 'Shared workflow must resolve to an immutable SHA');
   const settings = {
     signingFingerprint: fingerprint,
-    deploymentName: `${api.repository.replace('/', '-')}-${version}-${commit}-${runId}-${attempt}`,
+    deploymentName: `${api.repository.replace('/', '-')}-${version}`,
     outputTimestamp: await run('git', ['show', '-s', '--format=%ct', 'HEAD']),
   };
   const effective = join(directory, 'effective-pom.xml');
@@ -91,8 +91,9 @@ async function manifest(plan: Plan, directory: string) {
   const bundle = join(directory, 'bundle.zip');
   if (!await exists(bundle)) {
     const entries = await readdir('.', { recursive: true, withFileTypes: true });
+    // Absolute paths make the suffix match the root project's target directory too.
     const bundles = entries.filter(entry => entry.isFile() && entry.name === 'central-bundle.zip')
-      .map(entry => join(entry.parentPath, entry.name)).filter(path => path.replaceAll('\\', '/').endsWith('/target/central-publishing/central-bundle.zip'));
+      .map(entry => resolve(entry.parentPath, entry.name)).filter(path => path.replaceAll('\\', '/').endsWith('/target/central-publishing/central-bundle.zip'));
     assert(bundles.length === 1 && bundles[0], 'Expected one complete reactor Central bundle');
     await copyFile(bundles[0], bundle);
   }
