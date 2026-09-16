@@ -19,72 +19,14 @@ Allurx 项目的共享构建与发布工作流。当前支持 Maven CI、Maven C
 - Variable：`GPG_FINGERPRINT`，填写完整主公钥指纹。
 - 允许 `v*` tag 发布和 `main` 手动恢复。
 
-将以下示例保存为业务仓库的 `.github/workflows/ci.yml` 和 `.github/workflows/release.yml`。文件名是发布门禁的一部分；两个 `<SHA>` 均替换为本仓库同一个已验证的完整 commit SHA。凭据由 Environment 提供，无需 `secrets: inherit`。
+当前凭据取自调用方仓库的 Environment，无需 `secrets: inherit`，也不会读取 `allurx-build` 仓库的 Secrets。个人账号下各仓库的 Environment 独立，不能跨项目继承。[凭据传递规则](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow)
 
-**`.github/workflows/ci.yml`**
+共享工作流和业务仓库归属同一组织时，可集中配置四个组织级 Secrets 和 `GPG_FINGERPRINT` 变量，授权指定业务仓库，并在发布调用 job 添加 `secrets: inherit`。此时各仓库仍保留 Environment 的发布规则，不再重复保存同名凭据；Environment 中的同名 Secrets 会优先使用。[组织级 Secrets](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#creating-secrets-for-an-organization)
 
-```yaml
-name: CI
-on:
-  pull_request:
-    branches: [dev, main]
-  push:
-    branches: [dev, main]
-  workflow_dispatch:
-permissions:
-  contents: read
-  actions: read
-concurrency:
-  group: ci-${{ github.event_name }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: true
-jobs:
-  verify:
-    uses: allurx/allurx-build/.github/workflows/maven-ci.yml@<SHA>
-```
+将以下示例复制到业务仓库，两个 `<SHA>` 均替换为本仓库同一个已验证的完整 commit SHA。目标文件名是发布门禁的一部分：
 
-**`.github/workflows/release.yml`**
-
-```yaml
-name: Release
-on:
-  push:
-    tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Original annotated version tag
-        required: true
-        type: string
-      source-run-id:
-        description: Original publish run ID
-        required: true
-        type: string
-      source-run-attempt:
-        description: Original publish attempt
-        required: true
-        type: string
-      deployment-id:
-        description: Original deployment UUID, if missing from evidence
-        type: string
-permissions:
-  contents: read
-concurrency:
-  group: maven-central-release
-  cancel-in-progress: false
-  queue: max
-jobs:
-  release:
-    permissions:
-      contents: write
-      actions: read
-    uses: allurx/allurx-build/.github/workflows/maven-central-release.yml@<SHA>
-    with:
-      mode: ${{ github.event_name == 'workflow_dispatch' && 'recover' || 'publish' }}
-      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      source-run-id: ${{ inputs.source-run-id || '' }}
-      source-run-attempt: ${{ inputs.source-run-attempt || '' }}
-      deployment-id: ${{ inputs.deployment-id || '' }}
-```
+- [ci.yml](examples/ci.yml)：复制到业务仓库的 `.github/workflows/ci.yml`。
+- [release.yml](examples/release.yml)：复制到业务仓库的 `.github/workflows/release.yml`。
 
 业务仓库还需配置 required CI checks 和正式 tag 防修改、防删除规则；保留上述发布并发组，避免同一仓库同时发布。
 
@@ -100,12 +42,6 @@ jobs:
 
 ## 维护
 
-辅助工具使用 TypeScript 实现，工作流会自动准备环境并编译。Node/npm 版本见 [package.json](package.json)，JDK LTS 和 Maven 版本见 [setup/action.yml](.github/actions/setup/action.yml)。本工程构建命令：
-
-```sh
-npm ci --ignore-scripts
-npm run build
-node dist/release.js --help
-```
+辅助工具使用 TypeScript 实现。[package.json](package.json) 定义运行版本、依赖和构建命令；[setup/action.yml](.github/actions/setup/action.yml) 负责安装 Node/npm、按需准备 JDK LTS 和 Maven，并编译 CLI；本工程的构建验证见 [ci.yml](.github/workflows/ci.yml)。
 
 Dependabot 每周检查 npm 和 Actions；Node、JDK、Maven 的固定版本需单独维护。
