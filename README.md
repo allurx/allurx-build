@@ -4,14 +4,14 @@
 
 | 工作流 | 行为 |
 | --- | --- |
-| `maven-ci.yml` | 以 `release` profile 执行 `clean verify`，跳过签名；Surefire/Failsafe 报告保留 14 天 |
+| `maven-ci.yml` | 以 `release` profile 执行 `clean verify`，跳过签名 |
 | `maven-central-release.yml` | 校验发布身份，执行一次 Central 部署，核验公开制品，自动生成 GitHub Release |
 
 ## 接入
 
-1. 调用方根目录提供 POM 和 `release` profile，配置测试、sources、Javadoc、GPG 及 Central 插件。
+1. 调用方根 POM 提供符合 [Maven 接入契约](docs/maven-contract.md) 的 `release` profile。
 2. 复制 [examples/ci.yml](examples/ci.yml) 和 [examples/release.yml](examples/release.yml) 到调用方 `.github/workflows/`。
-3. 在调用方创建 `maven-central` Environment，允许 `v*` tag 部署，按需配置 reviewer，并设置：
+3. 在调用方创建 `maven-central` Environment，允许 `v*` tag 部署，按需设置审批人，并配置：
 
    | 类型 | 名称 | 内容 |
    | --- | --- | --- |
@@ -21,34 +21,40 @@
    | Secret | `GPG_PASSPHRASE` | 私钥口令 |
    | Variable | `GPG_FINGERPRINT` | 完整主公钥指纹，40 或 64 位十六进制字符 |
 
-Central Token 需有目标 namespace 的发布权限，签名公钥需已分发；凭据格式见 [Sonatype Maven 文档](https://central.sonatype.org/publish/publish-portal-maven/#credentials)。发布 job 绑定调用方的 `maven-central` Environment，生成 server ID 为 `central` 的 Maven settings，以 `MAVEN_GPG_PASSPHRASE` 传入口令。
+Central Token 需有目标 namespace 的发布权限，签名公钥需已分发；凭据格式见 [Sonatype 文档](https://central.sonatype.org/publish/publish-portal-maven/#credentials)。发布 job 绑定调用方的 `maven-central` Environment。
 
-发布调用 job 必须保留示例中的 `secrets: inherit`，用于规避 [actions/runner #4453](https://github.com/actions/runner/issues/4453) 报告的 Environment Secret 解析为空问题；Secret 仍存放在上述 Environment。
+接入约定：
 
-保留示例中的调用约定：
-
-- 发布分支 `main`、路径 `.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时可移除其触发项，保留 `main` push CI。
-- CI 需要 `contents: read`、`actions: read`；发布调用 job 需要 `contents: write`、`actions: read`。内部 Central job 仅有读权限，Release job 使用写权限。
-- 发布并发组为 `maven-central-release`，保留 `cancel-in-progress: false`、`queue: max`；调用方自行配置 required CI checks 和正式 tag 的防修改、防删除规则。
+- `main`、`.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时可移除其触发项。
+- 保留权限和并发配置；发布调用 job 的 `secrets: inherit` 用于规避 [actions/runner #4453](https://github.com/actions/runner/issues/4453) 报告的 Environment Secret 解析问题。
+- 在调用方配置 required CI checks 和正式 tag 的防修改、防删除规则。
 
 ### 注意事项
 
-- `inherit` 会将调用方可访问的全部 secrets 提供给直接调用的工作流，因此只应向可信的共享工作流启用；Environment 的绑定和审批仍由发布 job 执行，参见 [GitHub 复用工作流文档](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow)。
-- 示例使用 `@main`，每次新运行自动跟随本仓库 `main`，无需逐次更新 SHA。每次运行内部仍按实际解析的共享 SHA 检出工具并记录发布证据；CI 与发布是独立运行，期间共享 `main` 更新时可能使用不同工具版本。
+- `secrets: inherit` 向直接调用的工作流传递调用方可访问的全部 secrets，仅对可信工作流启用；Environment 绑定和审批仍由发布 job 执行，见 [GitHub 文档](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow)。
+- `@main` 跟随本仓库更新，每次运行按解析出的共享 SHA 检出工具并记录证据。CI 与发布独立运行，可能使用不同工具版本。
 
 ## 接口
 
-CI 无自定义 inputs、secrets 或 outputs。发布仅由 tag push 触发；唯一 input `tag` 默认为空，从事件读取，显式传入时必须与事件一致。输出 `version`（不含 `v`）、`commit`、`release-url`。
+CI 无自定义 inputs、secrets 或 outputs。发布仅接受 tag push：input `tag` 默认从事件读取，显式传入时须与事件一致；输出 `version`（不含 `v`）、`commit`、`release-url`。
 
-不提供自定义工具链、工作目录或 Maven 参数。Maven 硬约束见 [接入契约](docs/maven-contract.md)；发布步骤、证据附件和失败处理见 [发布指南](docs/release-guide.md)。
+工具链、工作目录和 Maven 参数不可自定义。
 
 ### 注意事项
 
 `version` 和 `commit` 来自准备阶段，不代表发布完成。
 
+## 运行 CI 与发布
+
+按示例接入后，推送到 `dev` / `main` 或向其提交 PR 会触发 CI。手动运行时，在调用方 **Actions → CI → Run workflow** 中选择分支。
+
+运行页面提供 job 日志；若生成 Surefire/Failsafe 报告，可下载 `maven-reports-<run_id>-<attempt>` artifact，保留 14 天。required checks 使用实际 CI 产生的名称。
+
+发布准备、tag 操作、结果核验和失败处理见 [发布指南](docs/release-guide.md)。
+
 ## 本地维护
 
-Node/npm 版本以 `package.json` 为准；Actions 工具链与 Maven 下载校验以 `.github/actions/setup/action.yml` 为准。在仓库根目录执行：
+Node/npm 版本见 `package.json`，Actions 工具链见 `.github/actions/setup/action.yml`。在仓库根目录执行：
 
 ```sh
 npm ci --ignore-scripts
@@ -59,5 +65,5 @@ node dist/release.js --help
 
 ### 注意事项
 
-- 这些检查不需要发布凭据，也不能证明真实 GitHub Actions 或 Central 发布成功。
-- `main` 是调用方自动更新的入口，变更应保持调用接口兼容，并同步核对示例和文档。
+- 本地检查无需发布凭据，不验证真实 Actions 或 Central 发布。
+- `main` 是调用方的更新入口；变更须保持接口兼容，并同步示例和文档。
