@@ -78,7 +78,7 @@ GitHub Release 的公开证据附件为 **`release-report.json` 与 `signing-pub
 | Central 已发布，后续核验或 Release 失败 | 保留原部署，按原证据处理失败阶段，不再次 deploy |
 | 原计划、bundle、公钥或部署证据缺失/过期 | 人工核查剩余日志与 Central 状态，不以重新构建替代原 bundle |
 
-从 `maven-deploy.log`、`release-evidence.json` 和 Central Portal 核对 deployment UUID/name。新计划的 `deploymentName` 为 `<owner>-<repository>-<version>`；精确查询使用 deployment ID，仅在日志中识别到唯一 UUID 时自动记录。
+从 `maven-deploy.log`、`release-evidence.json` 和 Central Portal 核对 deployment UUID/name。新计划的 `deploymentName` 为 `<repository>-<version>`；精确查询使用 deployment ID，仅在日志中识别到唯一 UUID 时自动记录。
 
 Maven 成功后，对 `PENDING`、`VALIDATING`、`PUBLISHING` 额外轮询最多 120 秒；失败后仅查询一次。`VALIDATED`、`FAILED` 或未知状态均停止流程，需人工调查。
 

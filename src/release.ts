@@ -75,7 +75,7 @@ async function publicationPlan(api: Github, directory: string): Promise<Plan> {
   assert(shared.length === 40 && /^[a-f0-9]{40}$/.test(shared), 'Shared workflow must resolve to an immutable SHA');
   const settings = {
     signingFingerprint: fingerprint,
-    deploymentName: `${api.repository.replace('/', '-')}-${version}`,
+    deploymentName: `${api.repository.split("/")[1]}-${version}`,
     outputTimestamp: await run('git', ['show', '-s', '--format=%ct', 'HEAD']),
   };
   const effective = join(directory, 'effective-pom.xml');
