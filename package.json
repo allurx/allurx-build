@@ -14,11 +14,11 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "fast-xml-parser": "5.11.1",
+    "fast-xml-parser": "5.11.2",
     "fflate": "0.8.3"
   },
   "devDependencies": {
-    "@types/node": "26.6.2",
+    "@types/node": "26.6.4",
     "typescript": "7.0.2"
   }
 }
