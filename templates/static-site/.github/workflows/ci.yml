@@ -1,0 +1,33 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
+name: CI
+
+# PR 只检查；main 推送或显式派发在验证后部署。
+on:
+    pull_request:
+    push:
+        branches:
+            - main
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: ci-${{ github.ref }}
+    # PR 更新时取消旧检查，生产部署则允许当前运行完成。
+    # 连续推送或派发时，只保留一个等待中的运行。
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+    site:
+        # 共享流程固定完整 commit SHA；配置包和工具版本由 package-lock.json 固定。
+        # 配置分支保护时，检查名称为 site / verify。
+        uses: allurx/allurx-build/.github/workflows/cloudflare-static-site.yml@WORKFLOWS_COMMIT_SHA
+        secrets: inherit
+        with:
+            # npm run verify 的输出目录，其中的文件会公开发布。
+            asset-directory: dist/
+            # GitHub 部署记录中的站点链接；填写这里不会自动配置域名。
+            production-url: https://example.com

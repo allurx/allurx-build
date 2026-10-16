@@ -1,16 +1,4 @@
 {
-  "compilerOptions": {
-    "target": "ES2025",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "rootDir": "src",
-    "outDir": "dist",
-    "types": ["node"],
-    "strict": true,
-    "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
-    "noEmitOnError": true,
-    "forceConsistentCasingInFileNames": true
-  },
-  "include": ["src/**/*.ts"]
+    "extends": "@allurx/js-config/tsconfig/node",
+    "include": ["*.ts", "src/**/*.ts", "tests/**/*.ts"]
 }

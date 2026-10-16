@@ -1,0 +1,16 @@
+name: Set up Maven
+description: 在 Linux 上安装经过校验的共享 Apache Maven 发行包
+runs:
+    using: composite
+    steps:
+        - name: Install Apache Maven
+          shell: bash
+          run: |
+              set -euo pipefail
+              # Runner 自带 Maven 版本可能变化，使用校验过的指定发行包。
+              archive="$RUNNER_TEMP/apache-maven-3.9.16-bin.tar.gz"
+              curl --fail --silent --show-error --location --retry 3 \
+                --output "$archive" https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/apache-maven-3.9.16-bin.tar.gz
+              echo "831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6  $archive" | sha512sum --check
+              tar -xzf "$archive" -C "$RUNNER_TEMP"
+              echo "$RUNNER_TEMP/apache-maven-3.9.16/bin" >> "$GITHUB_PATH"

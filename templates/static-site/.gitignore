@@ -1,0 +1,7 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
+# npm 安装的依赖、Vite 构建产物和 Wrangler 本地运行状态均可由命令重建。
+node_modules/
+dist/
+.wrangler/

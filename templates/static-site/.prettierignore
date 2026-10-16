@@ -1,0 +1,10 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
+# 只格式化维护源，不处理构建产物和 Wrangler 的本地状态。
+# node_modules 已由 Prettier 默认排除。
+dist/
+.wrangler/
+
+# 许可证保留原有段落排版。
+public/LICENSE.txt

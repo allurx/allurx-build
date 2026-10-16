@@ -1,0 +1,33 @@
+{
+    "compilerOptions": {
+        // JavaScript 版本和标准库类型统一采用 ES2025，不使用会随 TypeScript 升级变化的 ESNext。
+        // 浏览器和 Node.js 的额外类型在各自配置中添加，避免把两边的 API 混在一起。
+        "target": "ES2025",
+        "lib": ["ES2025"],
+        "types": [],
+
+        // 默认只查错：浏览器代码交给 Vite 构建，Node.js 脚本直接运行。
+        // 配置包需要生成 JavaScript 和声明文件时，在自己的构建配置中覆盖 noEmit。
+        "noEmit": true,
+        "isolatedModules": true,
+        "verbatimModuleSyntax": true,
+        "allowImportingTsExtensions": true,
+        "esModuleInterop": true,
+
+        // 除严格类型检查外，也检查遗漏的返回值、可能不存在的属性和未使用的声明。
+        "strict": true,
+        "allowUnusedLabels": false,
+        "allowUnreachableCode": false,
+        "exactOptionalPropertyTypes": true,
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noPropertyAccessFromIndexSignature": true,
+        "noUncheckedIndexedAccess": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+
+        // 省去检查依赖声明文件的开销；项目调用依赖时仍会检查类型。
+        "skipLibCheck": true
+    }
+}

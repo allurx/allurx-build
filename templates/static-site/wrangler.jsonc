@@ -1,0 +1,18 @@
+// Copyright 2026 allurx
+// SPDX-License-Identifier: Apache-2.0
+
+{
+    "$schema": "./node_modules/wrangler/config-schema.json",
+    // 改为你的 Worker 名称，部署会更新这个名称对应的站点。
+    "name": "my-site",
+    // 选择 Cloudflare 按哪个日期的兼容规则运行站点。
+    "compatibility_date": "2026-10-06",
+
+    // 直接托管 Vite 构建出的静态文件。
+    "assets": {
+        // 本地预览和手动部署读取这里；CI 会改用本次验证后下载的文件。
+        "directory": "./dist",
+        // 找不到文件时返回 404，可在 public/404.html 提供自定义页面。
+        "not_found_handling": "404-page",
+    },
+}

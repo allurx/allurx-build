@@ -1,46 +1,64 @@
 name: CI
-
 on:
-  pull_request:
-  push:
-    branches: [main, dev]
-  workflow_dispatch:
-
+    pull_request:
+    push:
+        branches: [main]
+    workflow_dispatch:
+    workflow_call:
 permissions:
-  contents: read
-
+    contents: read
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
+    group: ci-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+    cancel-in-progress: true
 jobs:
-  build:
-    name: Build release tool
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    node:
+        name: Node and package verification
+        strategy:
+            matrix:
+                os: [ubuntu-24.04, windows-2025]
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .node-version
+                  cache: npm
+            - run: npm ci --ignore-scripts
+            - run: npm run verify
+            - name: Validate dependency update policy
+              if: runner.os == 'Linux'
+              run: npm exec --yes --package renovate@44.164.10 -- renovate-config-validator --strict default.json
+    maven:
+        uses: ./.github/workflows/maven-ci.yml
         with:
-          persist-credentials: false
-      - name: Set up build tools
-        uses: ./.github/actions/setup
-        with:
-          maven: 'true'
-      - name: Verify installed tools
-        run: |
-          java --version
-          mvn --version
-          node dist/release.js --help
-      - name: Verify publication artifacts
-        run: npm test
-
-  dependabot-merge:
-    needs: build
-    permissions:
-      contents: write
-      pull-requests: write
-    uses: ./.github/workflows/dependabot-merge.yml
-    with:
-      target-branch: main
-      allowed-ecosystems: '["github_actions"]'
+            working-directory: maven-parent
+    java-consumers:
+        name: Java template verification
+        runs-on: ubuntu-24.04
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+              with:
+                  distribution: temurin
+                  java-version: "25"
+            - uses: ./actions/setup-maven
+            - name: Install the candidate parent and verify independent consumers
+              run: bash scripts/verify-maven-parent.sh
+    # 汇总所有验收任务，失败、取消和跳过都不能形成绿色门禁。
+    required:
+        name: CI required
+        needs: [node, maven, java-consumers]
+        if: always()
+        runs-on: ubuntu-24.04
+        steps:
+            - env:
+                  NODE_RESULT: ${{ needs.node.result }}
+                  MAVEN_RESULT: ${{ needs.maven.result }}
+                  CONSUMER_RESULT: ${{ needs.java-consumers.result }}
+              run: test "$NODE_RESULT" = success && test "$MAVEN_RESULT" = success && test "$CONSUMER_RESULT" = success

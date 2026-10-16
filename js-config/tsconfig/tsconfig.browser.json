@@ -1,0 +1,12 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        // 让 Vite 处理 import/export，并按打包工具的方式查找模块。
+        // 这里的 ESNext 用于模块格式，与 JavaScript 版本 target 是两项设置。
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+
+        // lib 数组会覆盖上一级配置，所以添加 DOM 时也要写上 ES2025。
+        "lib": ["ES2025", "DOM", "DOM.Iterable"]
+    }
+}

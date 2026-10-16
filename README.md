@@ -1,72 +1,63 @@
 # allurx-build
 
-可复用的 Maven CI、Dependabot 自动合并与发布工作流，适用于 GitHub.com 公开仓库。
+Allurx 项目的共享构建配置、GitHub Actions、依赖更新策略和起步模板。项目按需要选择入口；使用共享 CI 不要求同时采用父 POM、配置包或某种部署方式。
 
-| 工作流 | 行为 |
-| --- | --- |
-| `maven-ci.yml` | 以 `release` profile 执行 `clean verify`，跳过签名 |
-| `dependabot-merge.yml` | 调用方验证通过后，按共同策略合并常规 Dependabot PR，默认目标为 `dev` |
-| `maven-central-release.yml` | 校验发布身份，执行一次 Central 部署，核验公开制品，自动生成 GitHub Release |
+| 需要完成的工作                                 | 接入入口                                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 统一 Java 库的编译、测试和发布配置             | [Maven parent](maven-parent/README.md)，通过 Maven Central 的 `io.allurx:maven-parent` 使用                                                                         |
+| 复用 ESLint、Prettier、TypeScript 或 Vite 配置 | [JS Config](js-config/README.md)，通过 npm registry 的 `@allurx/js-config` 使用                                                                                     |
+| 验证 Maven 工程                                | [maven-ci.yml](.github/workflows/maven-ci.yml)，执行项目的 `clean verify`                                                                                           |
+| 验证 Node.js 工程                              | [Node 接入说明](docs/node.md)与 [node-ci.yml](.github/workflows/node-ci.yml)                                                                                        |
+| 发布 Maven 或 npm 制品                         | [maven-central-publish.yml](.github/workflows/maven-central-publish.yml)、[npm-publish.yml](.github/workflows/npm-publish.yml)，见[发布指南](docs/release-guide.md) |
+| 部署 Cloudflare 静态站点                       | [cloudflare-static-site.yml](.github/workflows/cloudflare-static-site.yml)，见[部署说明](docs/cloudflare-static-site.md)                                            |
+| 定期更新依赖                                   | 根 [Renovate preset](default.json)，见[依赖更新指南](docs/dependency-updates.md)                                                                                    |
+| 新建工程                                       | [项目模板](templates/README.md)                                                                                                                                     |
 
-## 接入
+业务依赖、模块、源码范围、产品构建和部署目标仍由项目维护。Spring Boot 应用可以保留官方 parent，只接入共享 Maven CI；纯 Node.js 工程可以只使用检查配置，不安装 Vite 或 Wrangler。
 
-1. 调用方根 POM 提供符合 [Maven 接入契约](docs/maven-contract.md) 的 `release` profile。
-2. 复制 [examples/ci.yml](examples/ci.yml) 和 [examples/release.yml](examples/release.yml) 到调用方 `.github/workflows/`。需要自动创建依赖 PR 时，按[依赖更新指南](docs/dependency-updates.md)接入 Dependabot。
-3. 在调用方创建 `maven-central` Environment，允许 `v*` tag 部署，按需设置审批人，并配置：
+## 接入工作流
 
-   | 类型 | 名称 | 内容 |
-   | --- | --- | --- |
-   | Secret | `CENTRAL_USERNAME` | Central Portal User Token 的 username |
-   | Secret | `CENTRAL_PASSWORD` | 同一 User Token 的 password |
-   | Secret | `GPG_PRIVATE_KEY` | ASCII-armored GPG 签名私钥 |
-   | Secret | `GPG_PASSPHRASE` | 私钥口令 |
-   | Variable | `GPG_FINGERPRINT` | 完整主公钥指纹，40 或 64 位十六进制字符 |
+共享工作流以 GitHub.com 为运行目标。Maven 和 npm 入口使用 GitHub.com 的 [workflow identity 上下文](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context)固定辅助工具来源，GitHub Enterprise Server 不在支持范围。
 
-Central Token 需有目标 namespace 的发布权限，签名公钥需已分发；凭据格式见 [Sonatype 文档](https://central.sonatype.org/publish/publish-portal-maven/#credentials)。发布 job 绑定调用方的 `maven-central` Environment。
+1. 在 [Releases](https://github.com/allurx/allurx-build/releases) 选择包含所需工作流的正式 `vX.Y.Z` 发行。
+2. 将下方 `WORKFLOW_TAG` 换成所选 tag，取得其指向的完整 40 位 commit SHA：
 
-接入约定：
+    ```sh
+    gh api repos/allurx/allurx-build/commits/WORKFLOW_TAG --jq .sha
+    ```
 
-- `main`、`.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时移除其触发项；自动合并的目标分支和生态范围按[依赖更新指南](docs/dependency-updates.md)设置。
-- 保留权限和并发配置；发布调用 job 的 `secrets: inherit` 用于规避 [actions/runner #4453](https://github.com/actions/runner/issues/4453) 报告的 Environment Secret 解析问题。
-- 在调用方配置 required CI checks 和正式 tag 的防修改、防删除规则。
+3. 用输出的 SHA 替换示例或模板工作流中的 `WORKFLOWS_COMMIT_SHA`，并在同行注释记录对应 tag。占位符不是可运行引用。
 
-### 注意事项
+Maven 工程可复制完整的 [CI 调用示例](examples/ci.yml)，按项目分支调整触发事件。其共享验证入口为：
 
-- `secrets: inherit` 向直接调用的工作流传递调用方可访问的全部 secrets，仅对可信工作流启用；Environment 绑定和审批仍由发布 job 执行，见 [GitHub 文档](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow)。
-- `@main` 跟随本仓库更新。Maven CI 与发布按本次解析的共享 SHA 检出工具并记录证据；各入口独立运行，可能使用不同共享版本。
+```yaml
+jobs:
+    verify:
+        uses: allurx/allurx-build/.github/workflows/maven-ci.yml@WORKFLOWS_COMMIT_SHA
+```
 
-## 接口
+调用方定义触发事件、权限和并发策略，项目专有检查保留为自己的 job。将全部必要检查配置为 required checks；只有一个共享 `verify` 成功，不能代替调用方额外的集成或浏览器验证。
 
-Maven CI 无自定义 inputs、secrets 或 outputs。自动合并通过 `target-branch` 选择目标分支，通过 `allowed-ecosystems` 限定已支持的生态，使用调用方事件与 `GITHUB_TOKEN`；默认值、接入权限及策略见[依赖更新指南](docs/dependency-updates.md)。发布仅接受 tag push：input `tag` 默认从事件读取，显式传入时须与事件一致；输出 `version`（不含 `v`）、`commit`、`release-url`。
-
-工具链、工作目录和 Maven 参数不可自定义。
-
-### 注意事项
-
-`version` 和 `commit` 来自准备阶段，不代表发布完成。
-
-## 运行 CI 与发布
-
-按示例接入后，推送到 `dev` / `main` 或向其提交 PR 会触发 CI。手动运行时，在调用方 **Actions → CI → Run workflow** 中选择分支。
-
-运行页面提供 job 日志；若生成 Surefire/Failsafe 报告，可下载 `maven-reports-<run_id>-<attempt>` artifact，保留 14 天。required checks 使用实际 CI 产生的名称。
-
-常规依赖 PR 的创建、自动合并和失败处理见[依赖更新指南](docs/dependency-updates.md)。发布准备、tag 操作和结果核验见[发布指南](docs/release-guide.md)。
+配置包版本、父 POM 版本和工作流版本独立演进。安装包时选择 registry 中确实已发布的精确版本，工作流升级通过修改 SHA 进入审阅；不使用分支名承担可重复安装或发布的版本标识。
 
 ## 本地维护
 
-Node/npm 版本见 `package.json`，Actions 工具链见 `.github/actions/setup/action.yml`。在仓库根目录执行：
+Node.js 版本以 [.node-version](.node-version) 为准，根目录通过 npm workspaces 管理 [js-config](js-config/package.json)。Maven 分发版本与校验在 [setup-maven](actions/setup-maven/action.yml) 中维护，Java 构建要求见[父 POM](maven-parent/pom.xml)。
+
+在仓库根目录执行：
 
 ```sh
 npm ci --ignore-scripts
-npm run check
-npm run build
-npm test
-node dist/release.js --help
+npm run verify
+bash scripts/verify-maven-parent.sh
 ```
 
-### 注意事项
+发布工具源码和测试由 Node.js 直接运行 TypeScript；根 `build` 只构建 JS Config。配置包独立清理和生成 JavaScript、类型声明，`prepack` 也会先执行该构建流程。Node 验证包含发布工具检查和配置包的真实 tarball 消费测试。
 
-- `npm test` 使用当前 `dist/` 产物和原生 Node 测试，需本机 GPG；签名用例只使用临时隔离 keyring，公开下载通过测试替身验证。
-- 本地检查无需发布凭据，不验证真实 Actions 或 Central 发布。
-- `main` 是调用方的更新入口；变更须保持接口兼容，并同步示例和文档。
+签名测试需要可执行的 `gpg` 与 `gpgconf`。上传保护的 Bash 集成测试在 Linux CI 必须执行；Windows 本地通过 `ALLURX_TEST_BASH` 指定 Git Bash，并在 `PATH` 中提供 `jq`；未指定 Bash 时该项会标记为跳过。Java 验证脚本使用 Bash，将候选 parent 安装到隔离 Maven 仓库，并验证 Java 库和 Spring Boot 服务模板；实际产品仍需自己的编译、JPMS、测试和附件验证。完整 CI 入口见 [ci.yml](.github/workflows/ci.yml)。
+
+发布本仓库组件统一从 **Actions → Release build infrastructure** 选择组件，发版前复用同一套完整 CI，通过后才读取已审阅 manifest 的版本并创建 tag。流程和失败恢复见[发布指南](docs/release-guide.md)。本地检查不验证 GitHub Environment、npm Trusted Publisher、Central 凭据或线上部署状态。
+
+## 许可证
+
+[Apache-2.0](LICENSE.txt)。

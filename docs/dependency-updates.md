@@ -1,49 +1,33 @@
-# 常规依赖更新
+# 依赖更新
 
-Dependabot 负责按计划创建更新 PR；共享自动合并工作流在调用方的全部验证通过后，决定是否将 PR 合入指定目标分支，默认是 `dev`。Maven CI、依赖合并和正式发布是独立入口，正式发布仍按[发布指南](release-guide.md)执行。
+Renovate 负责发现版本更新、创建 PR，并在项目检查通过后合并符合策略的更新；共同策略由根 [default.json](../default.json) 维护。项目的验证、分支保护和发布流程仍由项目自己负责。
 
 ## 接入
 
-1. 将 [examples/dependabot.yml](../examples/dependabot.yml) 复制到调用方的 `.github/dependabot.yml`，并合入默认分支。示例每周检查 Maven 与 GitHub Actions，向 `dev` 创建 PR，将常规 minor、patch 更新分组。该配置必须保留在每个调用方仓库，不能通过共享工作流继承；仅推送到非默认分支不会激活配置。详见 [GitHub 配置说明](https://docs.github.com/en/code-security/concepts/supply-chain-security/about-the-dependabot-yml-file)。
-2. 按 [examples/ci.yml](../examples/ci.yml) 调用 `maven-ci.yml` 和 `dependabot-merge.yml`。后者的调用 job 必须用 `needs` 列出所有验收 job；普通项目使用 `needs: verify`，Kit 还须等待真实浏览器验证，使用 `needs: [verify, selenium]`。项目专有测试留在调用方，不传入通用命令或“验证通过”布尔值。
-3. 在自动合并调用 job 显式声明 `contents: write` 和 `pull-requests: write`。共享工作流使用调用方的 `github` context 和 `GITHUB_TOKEN`，无需 `secrets: inherit` 或新增凭据。被调用方不能提升调用方授予的权限，见 [GitHub 复用工作流说明](https://docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations)。
+1. 为目标仓库安装并授权 Renovate GitHub App，完成 onboarding。
+2. 将 [Renovate 调用示例](../examples/renovate.json)复制为 `.github/renovate.json`，并纳入仓库默认分支。将 `extends` 固定到已发布的工作流版本；示例把更新 PR 发往 `dev`，直接在 `main` 开发时修改 `baseBranchPatterns`。共同策略由 preset 继承，项目只保留自己的目标分支和必要差异。
 
-保留原有验证 job 的标识，避免改变 required check 名称。验证失败、取消或未执行时，自动合并 job 不应运行。此入口直接在验证完成后执行 squash merge，不依赖仓库的原生 auto-merge 开关，也不替调用方修改分支保护。
+3. 在 GitHub 为目标分支设置完整 required checks，覆盖所有验收 job，例如 Java 的 Maven 与浏览器验证，或站点的完整 `site / verify`。
+4. 在首次更新 PR 中核对目标分支、版本变更和完整检查，确认 Renovate 实际按共享策略运行。
 
-## 调用方参数
+共享策略使用 `platformAutomerge: false`，由 Renovate 自身在检查通过后执行合并，分支保护继续约束合并结果。配置文件、App 授权和实际检查缺一不可；行为说明见 [Renovate 自动合并文档](https://docs.renovatebot.com/key-concepts/automerge/)。
 
-不传参数时，既有调用方继续处理指向 `dev` 的 Maven 与 GitHub Actions 更新。
+## 常规版本更新
 
-| 参数 | 默认值 | 用途 |
-| --- | --- | --- |
-| `target-branch` | `dev` | 自动合并允许的目标分支；事件条件和合并前回读使用同一值。 |
-| `allowed-ecosystems` | `["maven","github_actions"]` | 允许生态的 JSON 字符串，必须是这两个已支持值的非空子集。 |
+常规 patch、minor 和 digest 更新在完整检查通过后可自动合并；`0.x` 的 minor 更新、基础配置包、父 POM 和本仓库工作流更新保留人工审核。关联包采用 `config:recommended` 提供的分组，其余更新保留独立 PR。具体匹配、时间和并发设置以 [default.json](../default.json) 为准。
 
-例如，具备独立验证的工具仓库可在调用 job 中限定为指向 `main` 的 Actions 更新：
+npm 常规版本更新遵循 `security:minimumReleaseAgeNpm` 的发布年龄要求，达到预设观察期后再提出更新。该要求的范围与例外见 [Renovate npm 安全预设](https://docs.renovatebot.com/presets-security/#minimumreleaseagenpm)，不能把它当作对新依赖的安全审计。
 
-```yaml
-with:
-  target-branch: main
-  allowed-ecosystems: '["github_actions"]'
-```
+Maven、npm、Actions 和 Node.js 的版本声明保留在工具原生文件中。项目直接使用的工具由项目声明，`@allurx/js-config` 的 peer 范围只表达兼容性；升级时同时核对运行时、类型声明、插件和锁文件。
 
-本库 [CI](../.github/workflows/ci.yml) 在 `build` 成功后使用这组参数，并通过相对路径调用同一提交的共享工作流。本库的 npm 更新继续创建 PR，但不自动合并：现有测试已覆盖发布模型、归档和签名的主要行为，但外部父 POM 继承及部分损坏归档边界仍未覆盖。参数不扩展共享策略支持的生态，也不替代调用方需要的验证。
+## 漏洞告警与修复
 
-## 自动合并范围
+GitHub [Dependabot alerts](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-alerts) 根据依赖图报告已知漏洞；Renovate 读取告警并提出修复 PR。仓库需启用依赖图和告警功能，并允许 Renovate App 读取 Dependabot alerts。常规版本更新仍由 `.github/renovate.json` 管理，这些告警设置是独立的 GitHub 功能。
 
-共享工作流只接受 `pull_request` 事件中由 `dependabot[bot]` 创建、来源与调用方仓库相同、目标与 `target-branch` 一致的 PR。每项更新都必须满足以下策略；分组中任意一项不满足，整组保留人工处理。
+安全修复 PR 使用独立的并发额度，最多同时 5 个，不占用常规更新的 5 个名额；它们保留人工确认，完整检查通过后再合并。安全告警的处理不受常规更新时间表限制，具体行为见 [Renovate 漏洞告警配置](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)。
 
-- 只处理 `allowed-ecosystems` 选中的 Maven 或 GitHub Actions，metadata 必须明确为 patch 或 minor，且更新前后主版本一致；`0.x` 只允许 patch。
-- Actions 版本必须是三段数字，可带 `v` 前缀。Maven 接受至少两段的纯数字点分版本，例如 `1.37`、`25.0.1.1`；数字段不接受前导零。
-- 仅 `com.google.guava:guava` 允许前后保持相同的 `-jre` 或 `-android` 变体，不允许增加、移除或切换变体。其他限定词、预发布、空版本或无法识别的 metadata 保留人工处理。
-- `io.allurx:maven-parent` 和 `allurx/allurx-build` 的共享工作流、Action 更新保留人工核对。普通内部依赖不因 `io.allurx` 命名空间而排除，仍须通过版本策略和项目验证。
+## 合并与后续验证
 
-合并前再次读取实际目标分支，并用事件中的准确 head SHA 执行 `--match-head-commit`。更新后的 PR 必须重新验证，不能沿用旧 head 的结果。具体判断由[共享工作流](../.github/workflows/dependabot-merge.yml)维护，调用方不再复制脚本。
+站点依赖 PR 合入生产分支后，由该分支的正常 push CI 重新验证并部署实际提交。以 `dev` 开发的项目仍需正常集成到发布分支；依赖更新本身不创建版本 tag 或发布制品。项目无需在 CI 中另写合并脚本，部署使用生产分支同次运行的产物。
 
-## 结果与失败处理
-
-在调用方 **Actions → CI → Merge routine Dependabot updates** 查看 metadata、策略判断和合并结果。策略不允许时保留 PR 供人工审阅；验证或合并操作失败时保留失败结果，不跳过检查、重试到通过或增加无关权限。
-
-多个 PR 同时修改同一 workflow 文件时，先合入的 PR 可能使后一个 PR 的最终合并内容不再与其分支中的文件一致。GitHub 此时可能报告缺少 `workflows` 权限。例外要求同路径、同内容已存在于同仓库另一分支，见 [GitHub 权限说明](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps#available-scopes)和 [CLI 维护者解释](https://github.com/cli/cli/issues/11493)。按项目约定将当前目标分支合入该 PR 分支，重新核对差异并等待完整 CI；不要仅重跑旧 head。Actions 分组减少同轮竞争，但不保证所有基线变化都无需刷新。
-
-自动合并使用 `GITHUB_TOKEN`，由它产生的 push 不会再触发 push 工作流，见 [GitHub 事件触发说明](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)。自动合并只完成已验证的依赖更新进入目标分支，不会补跑 `main` push CI、创建 tag 或发布制品。使用默认 `dev` 的项目继续按正常流程集成发布；直接合入 `main` 的调用方须确认后续操作不依赖这次 push 事件。本库没有 main push 自动部署入口；会自动部署的站点应另行设计部署接续，不能直接照搬。
+检查失败、冲突或基础包升级需要兼容修改时，在 PR 中处理并重新验证准确 head。不要绕过 required checks、降低测试要求或把重新运行旧结果当作新版本验证。

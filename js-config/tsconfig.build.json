@@ -1,0 +1,13 @@
+{
+    "extends": "./tsconfig/tsconfig.node.json",
+    "compilerOptions": {
+        // 安装者直接使用编译结果，不需要执行包内的 TypeScript。
+        "noEmit": false,
+        "noEmitOnError": true,
+        "declaration": true,
+        "rewriteRelativeImportExtensions": true,
+        "rootDir": "configs",
+        "outDir": "dist"
+    },
+    "include": ["configs/**/*.ts"]
+}

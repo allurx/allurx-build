@@ -1,0 +1,15 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        // 按 Node.js 加载模块的方式检查导入，包括文件扩展名和 package.json 的 exports。
+        // NodeNext 根据 package.json 的 type 和文件后缀区分 ESM 与 CommonJS。
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+
+        // types 提供 Node.js 的 API 类型，ES2025 标准库类型已从 tsconfig.base.json 继承。
+        "types": ["node"],
+
+        // Node.js 默认只移除 .ts 文件中的类型，不转换 enum 等语法，所以在检查阶段禁止这些写法。
+        "erasableSyntaxOnly": true
+    }
+}

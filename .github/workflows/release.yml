@@ -1,0 +1,152 @@
+name: Release build infrastructure
+on:
+    workflow_dispatch:
+        inputs:
+            component:
+                description: 要发布的组件，版本从已审阅的 manifest 读取
+                required: true
+                type: choice
+                options: [workflows, maven-parent, js-config]
+            recovery-tag:
+                description: 要恢复的原 Maven tag；新发布留空
+                type: string
+                default: ""
+            recovery-run-id:
+                description: 保存原 Maven 发布 bundle 的运行 ID
+                type: string
+                default: ""
+            deployment-id:
+                description: 原 Central deployment ID；恢复只查询，不再次上传
+                type: string
+                default: ""
+permissions: {}
+concurrency:
+    group: release-${{ inputs.component }}
+    cancel-in-progress: false
+    # 发布请求保留排队，避免后来的请求替换尚未开始的版本。
+    queue: max
+jobs:
+    # 新发布复用完整 CI；恢复沿用原产物，不重新定义一套验证范围。
+    verify:
+        name: Verify release source
+        if: inputs.recovery-run-id == ''
+        uses: ./.github/workflows/ci.yml
+        permissions:
+            contents: read
+    prepare:
+        name: Create the verified component tag
+        needs: verify
+        if: ${{ !cancelled() && (needs.verify.result == 'success' || inputs.recovery-run-id != '') }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        permissions:
+            contents: write
+        outputs:
+            tag: ${{ steps.tag.outputs.tag }}
+        steps:
+            - name: Require the reviewed default branch
+              env:
+                  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+              run: test "$GITHUB_REF" = "refs/heads/$DEFAULT_BRANCH"
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .node-version
+                  package-manager-cache: false
+            - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+              with:
+                  distribution: temurin
+                  java-version: "25"
+            - uses: ./actions/setup-maven
+            - name: Create annotated component tag
+              id: tag
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  COMPONENT: ${{ inputs.component }}
+                  RECOVERY_TAG: ${{ inputs.recovery-tag }}
+                  RECOVERY_RUN: ${{ inputs.recovery-run-id }}
+                  DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+              run: |
+                  set -euo pipefail
+                  # 恢复只定位原 tag 和运行，不创建新的发布身份。
+                  if [[ -n "$RECOVERY_TAG" || -n "$RECOVERY_RUN" || -n "$DEPLOYMENT_ID" ]]; then
+                    test "$COMPONENT" = maven-parent
+                    [[ "$RECOVERY_RUN" =~ ^[1-9][0-9]*$ ]] && test -n "$DEPLOYMENT_ID"
+                    [[ "$RECOVERY_TAG" =~ ^maven-parent-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+                    test "$(git cat-file -t "refs/tags/$RECOVERY_TAG")" = tag
+                    echo "tag=$RECOVERY_TAG" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  # 各组件从自己的 manifest 读取版本，保持独立发布。
+                  case "$COMPONENT" in
+                    workflows) version="$(node -p 'require("./package.json").version')"; tag="v$version" ;;
+                    js-config) version="$(node -p 'require("./js-config/package.json").version')"; tag="js-config-v$version" ;;
+                    maven-parent) version="$(mvn -B -ntp -q -f maven-parent/pom.xml help:evaluate -Dexpression=project.version -DforceStdout -Dstyle.color=never)"; tag="maven-parent-v$version" ;;
+                  esac
+                  [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+
+                  # tag 中的运行标记用于区分原生重跑和另一轮新发布。
+                  if git show-ref --verify --quiet "refs/tags/$tag"; then
+                    test "$(git cat-file -t "refs/tags/$tag")" = tag
+                    test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$GITHUB_SHA"
+                    git for-each-ref --format='%(contents)' "refs/tags/$tag" |
+                      grep -Fx "Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" || {
+                        echo '::error::This version belongs to an earlier release run. Resume that run or use its recovery inputs.'
+                        exit 1
+                      }
+                  else
+                    message="$(printf 'Release %s %s\n\nWorkflow run: %s/%s/actions/runs/%s\nCreated in attempt: %s\n' \
+                      "$COMPONENT" "$version" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT")"
+                    object="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+                      -f tag="$tag" -f message="$message" -f object="$GITHUB_SHA" -f type=commit --jq .sha)"
+                    gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$object"
+                  fi
+                  echo "tag=$tag" >> "$GITHUB_OUTPUT"
+    maven-parent:
+        needs: prepare
+        if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.component == 'maven-parent' }}
+        uses: ./.github/workflows/maven-central-publish.yml
+        permissions:
+            contents: write
+            actions: read
+        secrets: inherit
+        with:
+            tag: ${{ needs.prepare.outputs.tag }}
+            tag-prefix: maven-parent-v
+            working-directory: maven-parent
+            recovery-run-id: ${{ inputs.recovery-run-id }}
+            deployment-id: ${{ inputs.deployment-id }}
+    js-config:
+        needs: prepare
+        if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.component == 'js-config' }}
+        uses: ./.github/workflows/npm-publish.yml
+        permissions:
+            contents: read
+            actions: read
+            id-token: write
+        with:
+            tag: ${{ needs.prepare.outputs.tag }}
+    workflows:
+        needs: prepare
+        if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.component == 'workflows' }}
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: write
+        steps:
+            - env:
+                  GH_TOKEN: ${{ github.token }}
+                  RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+              run: |
+                  set -euo pipefail
+                  object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object | select(.type == "tag") | .sha')"
+                  test -n "$object"
+                  test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object" --jq '.object.sha')" = "$GITHUB_SHA"
+                  if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName > release.json; then
+                    jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false' release.json
+                  else
+                    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$RELEASE_TAG"
+                  fi

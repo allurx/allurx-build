@@ -1,0 +1,12 @@
+node_modules/
+**/dist/
+**/target/
+.local/
+.vscode/
+*.tgz
+package-lock.json
+
+# 独立模块与模板项目不重复纳入根检查。
+js-config/
+maven-parent/
+templates/*/

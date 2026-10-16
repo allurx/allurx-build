@@ -1,24 +1,22 @@
 # allurx-build 工作指引
 
-本仓库维护共享 GitHub Actions 工作流和 TypeScript 发布 CLI；Maven 构建配置由调用方提供。
+本仓库维护共享配置、Actions、发布工具、Renovate preset 和模板。用途与维护命令见 [README](README.md)，各模块保留自己的约束。
 
-## 维护
+## 职责与维护
 
-- 修改接口、工具链或发布行为时，同步检查 `examples/` 和对应文档。
-- 共用 CI/CD 文档集中在本仓库；调用方只引用入口，保留自身构建和测试说明。
-- `src/` 是源码；`dist/`、`node_modules/` 不手工编辑或提交。
+- 源码注释与文档默认使用简体中文；需要声明文档时使用目标语言的标准多行形式（TypeScript 使用 JSDoc），实现内说明使用普通注释。版本标记、API、命令及已约定的检查名称保持原文。
+- `maven-parent/` 维护 Maven 构建配置，`js-config/` 维护 JavaScript/TypeScript 工具配置；配置包不调用工作流，也不读取消费者的业务配置。
+- `.github/workflows/` 维护验证、发布与部署，`actions/` 只放需要复用的动作，`src/` 是发布工具源码。`js-config/dist/`、`node_modules/` 和模板生成物不手工修改或提交。
+- 业务依赖、模块、文件范围、框架约定和专有交付逻辑留在消费者；普通 CI 与制品发布分开，接入 CI 不强制采用本库 parent。
+- 工作流与 preset、Maven parent、JS Config 分别使用各自 manifest 版本。改变公共入口时同步相关 README、[项目模板](templates/README.md)和消费者。
+- 消费者固定真实发行 commit SHA、registry 包的精确版本及锁文件。尚未发布时只使用真实 tarball 或隔离 Maven 仓库验证，不伪造 registry metadata、integrity 或可解析的工作流 SHA。
+- 依赖更新策略集中在 [default.json](default.json)。保持消费者完整 required checks；基础配置和共享工作流更新须人工审核，站点合并后由实际生产分支的 CI 验证并部署。
 
-## 开发与验证
+## 验证与发布
 
-- 工具链与验证命令见 [README 本地维护](README.md#本地维护)。
-- `prepare`、`deploy`、`finish` 会构建、生成证据或写入外部服务，不作 smoke test。
-
-## 发布逻辑维护
-
-修改发布逻辑时核对 [Maven 接入契约](docs/maven-contract.md) 和 [发布指南](docs/release-guide.md)，保留以下约束：
-
-- 各阶段绑定 annotated tag、发布 commit、其最新 `main` push CI run/attempt 和共享工作流 SHA；区分共享工具 SHA 与业务发布 SHA。
-- 调用方的 `main`、`.github/workflows/ci.yml`、`.github/workflows/release.yml` 参与历史查询，改名须同步实现和调用约定。
-- 先归档计划，再执行一次 deploy，最后核验公开制品。已进入 deploy 或无法排除上传时，不自动重部署；不以重建结果替代原始证据。
-- 公开附件可精简，阶段证据和校验不可削弱。按原发布 bundle 核验公开文件、哈希、签名和 POM，通过后才创建 Release；不声称与 CI 构建字节一致。
-- 新 Release 自动生成说明；已有 Release 须核对身份和附件，不覆盖正文或冲突附件，不自动迁移旧格式。
+- 修改共享配置或模板后，用实际打包产物在独立消费者中验证；父 POM 继承变化须验证相关 Java 消费者，Web 构建变化须保留产品所需的不同交付方式。
+- 修改 workflow 时检查语法、调用路径、权限、事件及恢复分支。工作流测试替身和本地构建通过不能表述为远端发布成功。
+- 发布命令会写入外部服务，不用于 smoke test。发布前核对已审阅 manifest、准确 commit、annotated tag 和所需 Environment；正式 tag 不移动或复用。
+- Maven 上传前保存并验证原始 bundle 与签名；npm 上传前保存真实 tarball 及其身份。上传、公开核验和恢复均使用这些产物，不以重新构建或重新打包替代原发布证据。
+- Maven 上传已进入或结果不明确时，保留 deployment ID，按[发布指南](docs/release-guide.md)查询和恢复，不重新上传。npm 同版本已存在时先核对原 tarball integrity，不能覆盖已有版本。
+- 保留失败阶段、原始错误和已完成结果；artifact 名称、进程退出码或 registry 状态都不能单独证明完整发布成功。

@@ -1,25 +1,36 @@
 {
-  "name": "allurx-build",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "description": "Shared Maven CI and Central release tooling",
-  "packageManager": "npm@12.0.2",
-  "engines": {
-    "node": ">=26.8.2 <27",
-    "npm": "12.0.2"
-  },
-  "scripts": {
-    "build": "tsc",
-    "check": "tsc --noEmit",
-    "test": "node --test"
-  },
-  "dependencies": {
-    "fast-xml-parser": "5.11.2",
-    "fflate": "0.8.3"
-  },
-  "devDependencies": {
-    "@types/node": "26.6.5",
-    "typescript": "7.0.2"
-  }
+    "name": "allurx-build",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "description": "Shared build configuration, verification and delivery workflows.",
+    "workspaces": [
+        "js-config"
+    ],
+    "engines": {
+        "node": ">=24.21.0 <25"
+    },
+    "scripts": {
+        "build": "npm run build --workspace @allurx/js-config",
+        "check": "npm run format:check && npm run lint && npm run type-check && npm run check --workspace @allurx/js-config",
+        "test": "node --test tests/*.test.ts",
+        "verify": "npm run build && npm run check && npm test && npm test --workspace @allurx/js-config",
+        "type-check": "tsc --noEmit",
+        "lint": "eslint src tests eslint.config.ts --max-warnings 0",
+        "format:check": "prettier . --check",
+        "format": "prettier . --write"
+    },
+    "dependencies": {
+        "fflate": "0.8.3"
+    },
+    "devDependencies": {
+        "@types/node": "24.19.2",
+        "typescript": "6.0.3",
+        "@allurx/js-config": "file:./js-config",
+        "eslint": "10.12.0",
+        "prettier": "3.9.10",
+        "jiti": "2.7.0"
+    },
+    "prettier": "@allurx/js-config/prettier",
+    "license": "Apache-2.0"
 }

@@ -1,0 +1,351 @@
+name: Publish to Maven Central
+on:
+    workflow_call:
+        inputs:
+            tag:
+                description: 附带注释的发布 tag；默认读取 tag 事件
+                type: string
+                default: ""
+            tag-prefix:
+                description: 项目语义版本之前的 tag 前缀
+                type: string
+                default: v
+            working-directory:
+                description: Maven 工程相对源码仓库根目录的路径
+                type: string
+                default: .
+            java-version:
+                description: 执行发布构建的 JDK 版本
+                type: string
+                default: "25"
+            recovery-run-id:
+                description: 保存原 bundle 的运行 ID；仅恢复时填写
+                type: string
+                default: ""
+            deployment-id:
+                description: 要查询的原 Central deployment ID，不执行再次上传
+                type: string
+                default: ""
+        outputs:
+            version:
+                value: ${{ jobs.publish.outputs.version }}
+                description: 发布 tag 对应的项目版本
+            commit:
+                value: ${{ jobs.publish.outputs.commit }}
+                description: 发布 tag 指向的源码 commit
+            release-url:
+                value: ${{ jobs.release.outputs.release-url }}
+                description: 完成核验的 GitHub Release 地址
+permissions: {}
+
+jobs:
+    request:
+        name: Validate publication request
+        runs-on: ubuntu-24.04
+        permissions: {}
+        steps:
+            - env:
+                  RECOVERY_RUN: ${{ inputs.recovery-run-id }}
+                  DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+              run: |
+                  if [[ -n "$RECOVERY_RUN" || -n "$DEPLOYMENT_ID" ]]; then
+                    [[ "$RECOVERY_RUN" =~ ^[1-9][0-9]*$ ]] && [[ -n "$DEPLOYMENT_ID" ]]
+                  fi
+    # 先保存并验签发布归档，再由独立任务上传同一份字节。
+    build:
+        name: Build and sign release bundle
+        needs: request
+        if: inputs.recovery-run-id == ''
+        runs-on: ubuntu-24.04
+        timeout-minutes: 45
+        environment: maven-central
+        permissions:
+            contents: read
+            actions: read
+        outputs:
+            version: ${{ steps.identity.outputs.version }}
+            commit: ${{ steps.identity.outputs.commit }}
+        env:
+            RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+            TAG_PREFIX: ${{ inputs.tag-prefix }}
+            RELEASE_DIR: ${{ github.workspace }}/release-data
+            GNUPGHOME: ${{ github.workspace }}/.release-gnupg
+            GPG_FINGERPRINT: ${{ vars.GPG_FINGERPRINT }}
+        steps:
+            - name: Check out release source
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: refs/tags/${{ inputs.tag || github.ref_name }}
+                  fetch-depth: 0
+                  path: project
+                  persist-credentials: false
+            - name: Check out matching workflow tools
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: ${{ job.workflow_repository }}
+                  ref: ${{ job.workflow_sha }}
+                  path: .allurx-build
+                  persist-credentials: false
+            - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+              with:
+                  distribution: temurin
+                  java-version: ${{ inputs.java-version }}
+            - uses: ./.allurx-build/actions/setup-maven
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .allurx-build/.node-version
+                  package-manager-cache: false
+            - name: Install release helpers
+              working-directory: .allurx-build
+              run: npm ci --omit=dev --ignore-scripts --workspaces=false
+            - name: Verify release identity
+              id: identity
+              working-directory: project/${{ inputs.working-directory }}
+              run: |
+                  set -euo pipefail
+                  export PROJECT_VERSION="$(mvn -B -ntp -q help:evaluate -Dexpression=project.version -DforceStdout -Dstyle.color=never)"
+                  node "$GITHUB_WORKSPACE/.allurx-build/src/release.ts" check-tag
+            # 原归档是发布依据；缺失时必须先排除已上传，才能补做首次构建。
+            - name: Reuse the original bundle when rerunning
+              id: retained
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate |
+                    jq --raw-output --arg name "maven-bundle-$GITHUB_RUN_ID" '.artifacts[] | select(.name == $name and .expired == false) | .id')"
+                  if [[ -n "$id" ]]; then
+                    [[ "$id" =~ ^[0-9]+$ ]]
+                    echo "artifact-id=$id" >> "$GITHUB_OUTPUT"
+                  elif [[ "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
+                    bash .allurx-build/scripts/assert-upload-not-started.sh \
+                      'Publish retained bundle' 'Upload once or query the original deployment' project
+                  fi
+            - name: Require native bundle-only publication support
+              if: steps.retained.outputs.artifact-id == ''
+              working-directory: project/${{ inputs.working-directory }}
+              run: |
+                  set -euo pipefail
+                  mvn -B -ntp -Prelease org.apache.maven.plugins:maven-help-plugin:3.5.2:describe \
+                    -Dplugin=org.sonatype.central:central-publishing-maven-plugin -Dgoal=publish -Ddetail \
+                    "-Doutput=$RUNNER_TEMP/central-publisher.txt"
+                  grep -Eq '^[[:space:]]*User property: skipUpload[[:space:]]*$' "$RUNNER_TEMP/central-publisher.txt"
+            - name: Import release signing key
+              if: steps.retained.outputs.artifact-id == ''
+              env:
+                  GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+              run: |
+                  install -d -m 700 "$GNUPGHOME"
+                  printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+            - name: Build verified bundle without uploading
+              if: steps.retained.outputs.artifact-id == ''
+              working-directory: project/${{ inputs.working-directory }}
+              env:
+                  MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+                  SHARED_WORKFLOW_SHA: ${{ job.workflow_sha }}
+              run: |
+                  set -euo pipefail
+                  mkdir -p "$RELEASE_DIR"
+                  timestamp="$(git show -s --format=%ct HEAD)"
+                  mvn -B -ntp -Prelease -DskipUpload=true -Dgpg.bestPractices=true \
+                    "-Dgpg.keyname=$GPG_FINGERPRINT" "-Dproject.build.outputTimestamp=$timestamp" \
+                    clean deploy 2>&1 | tee "$RELEASE_DIR/build.log"
+                  mapfile -d '' bundles < <(find . -type f -path '*/target/central-publishing/central-bundle.zip' -print0)
+                  test "${#bundles[@]}" -eq 1
+                  cp -- "${bundles[0]}" "$RELEASE_DIR/bundle.zip"
+                  gpg --batch --armor --export "$GPG_FINGERPRINT" > "$RELEASE_DIR/signing-public-key.asc"
+                  node "$GITHUB_WORKSPACE/.allurx-build/src/release.ts" inspect
+            - name: Retain the exact release bundle
+              if: steps.retained.outputs.artifact-id == ''
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: maven-bundle-${{ github.run_id }}
+                  path: release-data/
+                  if-no-files-found: error
+                  retention-days: 90
+            - name: Preserve build diagnostics
+              if: always()
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: maven-build-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: |
+                      release-data/build.log
+                      project/**/target/surefire-reports/**
+                      project/**/target/failsafe-reports/**
+                  if-no-files-found: ignore
+                  retention-days: 14
+            - name: Remove temporary signing keyring
+              if: always()
+              run: rm -rf -- "$GNUPGHOME"
+
+    # 恢复会跳过 build，显式状态条件仍允许查询原部署。
+    publish:
+        name: Publish retained bundle
+        needs: [request, build]
+        if: ${{ !cancelled() && needs.request.result == 'success' && (needs.build.result == 'success' || (inputs.recovery-run-id != '' && inputs.deployment-id != '')) }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 45
+        environment: maven-central
+        permissions:
+            contents: read
+            actions: read
+        outputs:
+            artifact-id: ${{ steps.publication.outputs.artifact-id }}
+            version: ${{ steps.source.outputs.version }}
+            commit: ${{ steps.source.outputs.commit }}
+        env:
+            RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+            TAG_PREFIX: ${{ inputs.tag-prefix }}
+            RELEASE_DIR: ${{ github.workspace }}/release-data
+            DEPLOYMENT_ID: ${{ inputs.deployment-id }}
+        steps:
+            - name: Check the current release tag
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: refs/tags/${{ inputs.tag || github.ref_name }}
+                  fetch-depth: 0
+                  path: project
+                  persist-credentials: false
+            - name: Resolve annotated source identity
+              id: source
+              working-directory: project
+              run: |
+                  set -euo pipefail
+                  test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+                  version="${RELEASE_TAG#"$TAG_PREFIX"}"
+                  test "$RELEASE_TAG" = "$TAG_PREFIX$version"
+                  [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+                  echo "version=$version" >> "$GITHUB_OUTPUT"
+                  echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            - name: Check out matching workflow tools
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: ${{ job.workflow_repository }}
+                  ref: ${{ job.workflow_sha }}
+                  path: .allurx-build
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .allurx-build/.node-version
+                  package-manager-cache: false
+            - name: Install release helpers
+              working-directory: .allurx-build
+              run: npm ci --omit=dev --ignore-scripts --workspaces=false
+            - name: Download original bundle
+              uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: maven-bundle-${{ inputs.recovery-run-id || github.run_id }}
+                  run-id: ${{ inputs.recovery-run-id || github.run_id }}
+                  github-token: ${{ github.token }}
+                  path: release-data
+            - name: Verify recovery run provenance
+              if: inputs.recovery-run-id != ''
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  SOURCE_RUN: ${{ inputs.recovery-run-id }}
+                  EXPECTED_COMMIT: ${{ steps.source.outputs.commit }}
+                  WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+                  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+              run: |
+                  set -euo pipefail
+                  workflow_sha="$(node -p 'JSON.parse(require("fs").readFileSync("release-data/manifest.json", "utf8")).workflowSha')"
+                  gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" | jq -e \
+                    --arg commit "$EXPECTED_COMMIT" --arg repo "$GITHUB_REPOSITORY" \
+                    --arg workflow "$WORKFLOW_REPOSITORY/.github/workflows/maven-central-publish.yml" \
+                    --arg branch "$DEFAULT_BRANCH" --arg sha "$workflow_sha" '
+                      .repository.full_name == $repo
+                      and ((.event == "push" and .head_sha == $commit)
+                        or (.event == "workflow_dispatch" and (.head_branch == $branch or .head_sha == $commit)))
+                      and any(.referenced_workflows[]?; (.path | split("@")[0]) == $workflow and .sha == $sha)
+                    '
+            - name: Check whether a retry may enter upload
+              if: inputs.deployment-id == '' && github.run_attempt > 1
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  bash .allurx-build/scripts/assert-upload-not-started.sh \
+                    'Publish retained bundle' 'Upload once or query the original deployment' project
+                  echo 'UPLOAD_RETRY_ALLOWED=true' >> "$GITHUB_ENV"
+            - name: Upload once or query the original deployment
+              env:
+                  EXPECTED_COMMIT: ${{ steps.source.outputs.commit }}
+                  CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+                  CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+              run: |
+                  if [[ -n "$DEPLOYMENT_ID" ]]; then
+                    node .allurx-build/src/release.ts status
+                  else
+                    node .allurx-build/src/release.ts upload
+                  fi
+            - name: Verify published bytes
+              env:
+                  EXPECTED_COMMIT: ${{ steps.source.outputs.commit }}
+              run: node .allurx-build/src/release.ts verify
+            - name: Preserve publication result
+              id: publication
+              if: always()
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: maven-publication-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: release-data/
+                  if-no-files-found: error
+                  retention-days: 90
+
+    # skipped 祖先不能阻断已完成公开核验后的 Release 收尾。
+    release:
+        name: Create GitHub Release
+        needs: publish
+        if: ${{ !cancelled() && needs.publish.result == 'success' }}
+        runs-on: ubuntu-24.04
+        timeout-minutes: 5
+        permissions:
+            contents: write
+            actions: read
+        outputs:
+            release-url: ${{ steps.release.outputs.release-url }}
+        env:
+            RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+            RELEASE_DIR: ${{ github.workspace }}/release-data
+        steps:
+            - name: Check out the verified release tag
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: refs/tags/${{ inputs.tag || github.ref_name }}
+                  fetch-depth: 0
+                  path: project
+                  persist-credentials: false
+            - name: Resolve release source
+              id: source
+              working-directory: project
+              run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            - name: Check out matching workflow tools
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: ${{ job.workflow_repository }}
+                  ref: ${{ job.workflow_sha }}
+                  path: .allurx-build
+                  persist-credentials: false
+            - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .allurx-build/.node-version
+                  package-manager-cache: false
+            - name: Install release helpers
+              working-directory: .allurx-build
+              run: npm ci --omit=dev --ignore-scripts --workspaces=false
+            - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  artifact-ids: ${{ needs.publish.outputs.artifact-id }}
+                  path: release-data
+                  merge-multiple: true
+            - name: Publish release notes and verification
+              id: release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  EXPECTED_COMMIT: ${{ steps.source.outputs.commit }}
+              run: node .allurx-build/src/release.ts github-release
+            - name: Show verified release
+              env:
+                  RELEASE_URL: ${{ steps.release.outputs.release-url }}
+              run: |
+                  printf 'Release: %s\n' "$RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"

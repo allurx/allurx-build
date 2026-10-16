@@ -1,91 +1,109 @@
-# 发布指南
+# 发布与恢复
 
-## 发布步骤
+本仓库的组件统一由 [release.yml](../.github/workflows/release.yml) 的 `workflow_dispatch` 发布。版本先在源码 manifest 中审阅；普通发布通过 `verify` job 复用完整 [ci.yml](../.github/workflows/ci.yml)，全部门禁通过后才创建 annotated tag 并发布对应制品。
 
-首次发布前完成 [接入和凭据配置](../README.md#接入)。以下操作在调用方仓库执行，本地验证遵循其开发说明。
+## 首次准备
 
-1. 统一整个 reactor 的正式版本，完成本地验证，将变更合入 `main`。长期 `dev` 分支遵循下方约定。
-2. 在干净的 `main` checkout 中执行 `git pull --ff-only`。核对发布 commit 位于远端 `main` 历史中、POM 版本与待发布版本一致，且该 commit 对应 `.github/workflows/ci.yml` 的**最新 main push run 及其最新 attempt 成功**。
-3. 创建并推送直接指向该 commit 的 annotated tag。将 `1.2.3` 替换为正式版本，`<RELEASE_COMMIT_SHA>` 替换为已核验的完整 SHA：
+先建立仓库完整 required checks 和正式 tag 的防修改、防删除保护。发布只从已审阅的默认分支提交发起；配置包、parent 和工作流分别发布，不自动级联升级消费者。
 
-   ```sh
-   git tag -a v1.2.3 <RELEASE_COMMIT_SHA> -m "Release v1.2.3"
-   git push origin refs/tags/v1.2.3
-   ```
+Maven 发布使用调用方的 `maven-central` Environment。按需要设置分支/tag限制与审批，并配置以下值：
 
-4. 在 **Actions → Release** 中完成 Environment 审批（如有）。待发布和公开核验两个 job 成功后，核对 GitHub Release 的 tag、commit 和证据附件；审阅自动生成的说明，为破坏性变更补充迁移指引。
-5. 将已核验的发布 commit 同步回长期 `dev` 分支（如有）；若 `dev` 有更新，推送并检查其 CI。
+| 类型     | 名称               | 内容                                  |
+| -------- | ------------------ | ------------------------------------- |
+| Secret   | `CENTRAL_USERNAME` | Central Portal User Token 的 username |
+| Secret   | `CENTRAL_PASSWORD` | 同一 User Token 的 password           |
+| Secret   | `GPG_PRIVATE_KEY`  | ASCII-armored GPG 私钥                |
+| Secret   | `GPG_PASSPHRASE`   | 私钥口令                              |
+| Variable | `GPG_FINGERPRINT`  | 完整主公钥指纹                        |
 
-### 长期分支约定
+Token 需有目标 namespace 的发布权限；签名公钥需按 Central 要求可获取。令牌和签名配置参考 [Sonatype 发布说明](https://central.sonatype.org/publish/publish-portal-maven/)，不要把凭据写入 POM、源码或命令行参数。
 
-符合[自动合并策略](dependency-updates.md)的 Dependabot PR 可自动合入 `dev`，其余操作由维护者执行。发布工作流不承担分支合并或同步。
+npm 发布使用 `npm` Environment 与 OIDC。首次创建包时，由有权且已登录的 npm 账号发布**经过验证的真实 tarball**；包建立后，在 npm 的 Trusted Publisher 中配置 GitHub 用户 `allurx`、仓库 `allurx-build`、最初调用工作流文件名 `release.yml`、Environment `npm`，并允许直接 `npm publish`。不要把被调用的 `npm-publish.yml` 当作最初的发布入口。其他工程复用此工作流时，登记该工程自己的仓库、最初调用入口和 Environment。发布 job 需要 `id-token: write`，无需长期 npm 写入令牌。具体权限和配置步骤见 [npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers/)。
 
-| 集成方向 | 方式 |
-| --- | --- |
-| 短期功能、修复或依赖更新分支 → `dev` | `Squash and merge` |
-| `dev` → `main` 的发布 PR | `Create a merge commit`，保留长期分支的祖先关系 |
-| 已核验的发布 commit → `dev` | 已包含则跳过；可快进则快进；分叉时普通合并并保留后续改动 |
+## 发布本仓库组件
 
-## 执行阶段
+1. 修改相应 manifest 的稳定版本，完成本地验证、审阅与默认分支集成；核对发布提交及其完整 CI。
+2. 在 **Actions → Release build infrastructure → Run workflow** 选择默认分支和 `component`，普通发布保留全部恢复参数为空。
+3. 等待发版前 CI 完成：Linux、Windows 的 Node 与配置包验证、Maven parent 验证、Java 消费者模板验证均须通过 `CI required`。随后工作流读取版本并生成下表 tag。已有 tag 只允许同一 run 恢复使用，并核对 annotated tag、提交和记录的 run 身份；另一次 run 需使用相应恢复入口。完成 Environment 审批后，查看对应发布 job 和公开验证结果。
 
-| 阶段 | 行为 |
-| --- | --- |
-| `prepare` | 校验发布身份、精确 CI 和 effective POM，排除重复部署；计划归档到 Actions 后才允许部署 |
-| `deploy` | 核对归档计划摘要，复查 CI、源码和重复部署；执行一次签名 `clean deploy`，保留原 bundle 与日志；要求 Maven 成功且 Central 为 `PUBLISHED` |
-| `finish` | 独立 job 从 `https://repo.maven.apache.org/maven2` 逐一下载 manifest 中的文件，核验大小、SHA-256、签名及 POM/父 POM 元数据；再确认 tag，生成报告并创建或补全 Release |
+| component      | 版本来源                                            | tag                   |
+| -------------- | --------------------------------------------------- | --------------------- |
+| `workflows`    | 根 [package.json](../package.json)                  | `vX.Y.Z`              |
+| `maven-parent` | [maven-parent/pom.xml](../maven-parent/pom.xml)     | `maven-parent-vX.Y.Z` |
+| `js-config`    | [js-config/package.json](../js-config/package.json) | `js-config-vX.Y.Z`    |
 
-构建以提交时间设置 `project.build.outputTimestamp`。公开核验比较原发布 bundle 与公开文件，不依赖搜索索引。
+工作流组件创建 GitHub Release；Maven parent 发布到 Central 并附上公开核验结果；JS Config 发布到标准 npm registry 并核对 registry 公布的 tarball integrity。消费者随后按自己的流程升级 parent/package 版本、锁文件或工作流完整 SHA，不能将本仓库发布成功表述为消费者已完成升级。
 
-### 注意事项
+## 调用方发布 Maven 制品
 
-- PR、dev、手动 CI 不满足发布门禁。
-- 发布 commit 不必是 `main` 最新 tip；tag 对象、commit 和共享工具 SHA 须始终与计划一致，不能移动或重建 tag，也不能跨工具版本重跑旧计划。
-- 已有计划沿用保存的 `deploymentName`，不重新生成。
-- 公开核验不能证明 CI 与发布两次构建的字节一致；Maven 成功、`PUBLISHED` 或准备阶段 outputs 均不能单独证明整个流程完成。
+独立项目保留自己的 Release 触发和分支流程，调用 `maven-central-publish.yml`。先满足 [Maven 契约](maven-contract.md)，按[工作流接入步骤](../README.md#接入工作流)取得正式发行的 40 位 SHA，并替换下方占位符：
 
-## 证据与 GitHub Release
+```yaml
+jobs:
+    publish:
+        uses: allurx/allurx-build/.github/workflows/maven-central-publish.yml@WORKFLOWS_COMMIT_SHA
+        permissions:
+            contents: write
+            actions: read
+        secrets: inherit
+        with:
+            tag: ${{ github.ref_name }}
+```
 
-调用方发布运行中的 Actions artifacts 配置保留 **90 天**：
+完整的 [Maven 发布调用示例](../examples/release.yml)包含 tag 推送发布和手动查询恢复；手动入口须填写原 tag、run ID 和 deployment ID。`working-directory`、`java-version` 和 `tag-prefix` 用于实际存在的项目差异。调用方自己核对发布分支、提交、测试与版本，发布工作流不替它合并分支或发布其他工程。
 
-| Artifact | 内容 |
-| --- | --- |
-| `release-plan-<attempt>` | `release-plan.json`：发布身份、原 run/attempt、共享 SHA、CI、签名指纹和 reactor 模型 |
-| `release-evidence-<attempt>` | 计划、`release-evidence.json`、`bundle.zip`、公钥、`manifest.json`、effective POM 和 Maven 日志（以已生成为准） |
-| `public-verification-<run_id>-<attempt>` | 核验成功后生成的内部 `public-verification.json` 和汇总 `release-report.json` |
+## 调用方发布 npm 包
 
-准备成功后，后续失败也会尝试归档。原 bundle 和日志仅存于 Actions artifact。
+`npm-publish.yml` 面向标准 npm registry 的公开包。调用方仓库根目录提供 `.node-version`、锁文件和完整的 `npm run verify`，构建验证无需发布凭据。包的名称、版本、公开文件和 registry 元数据由其 `package.json` 维护。
 
-GitHub Release 的公开证据附件为 **`release-report.json` 与 `signing-public-key.asc`**。报告汇总发布身份、原 run/attempt、CI 与共享 SHA、部署与签名信息、完整制品清单及核验结果。
+单包工程使用 `workspace: .`；npm workspaces 工程填写要发布的 workspace 目录。下面的 job 对应 annotated `vX.Y.Z` tag 触发，完整 SHA 的获取方式见[接入步骤](../README.md#接入工作流)：
 
-新 Release 以 tag 为标题，[自动生成说明](https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes)，无需逐版本说明文件；类型为正式发布，正文保留绑定 commit 与 tag 对象的隐藏标记。
+```yaml
+jobs:
+    publish:
+        uses: allurx/allurx-build/.github/workflows/npm-publish.yml@WORKFLOWS_COMMIT_SHA
+        permissions:
+            contents: read
+            actions: read
+            id-token: write
+        with:
+            tag: ${{ github.ref_name }}
+            workspace: .
+            tag-prefix: v
+```
 
-已有 Release 先核对全部目标附件的 SHA-256，再补缺失附件。
+先按[首次准备](#首次准备)登记调用方自己的 Trusted Publisher 和 `npm` Environment。工作流构建并保留实际 tarball，再由 OIDC 发布任务消费；恢复使用原 Actions run，不另建重新打包的发布入口。
 
-### 注意事项
+## 产物与成功条件
 
-- 中断可能导致文件未产生或未上传，artifact 名称不能证明证据完整。
-- 已有 Release 必须保持上述身份，且不能为 draft 或 prerelease；工具不覆盖正文或冲突附件。
-- 若含旧版公开附件 `release-plan.json`、`manifest.json` 或 `public-verification.json`，新版 `finish` 停止。须使用原工具版本和原证据，不自动混用、迁移或删除旧附件；Central 制品不受影响。
+Maven 流程使用 `skipUpload` 构建签名 bundle，检查并保存 `bundle.zip`、manifest 和公钥后，只上传保存的原文件。上传返回的 deployment ID 进入状态记录；Central 为 `PUBLISHED` 后，再逐项核对公开文件的大小与 SHA-256，最后创建 GitHub Release 草稿，核对公开附件完整后发布。相关产物保存在 `maven-bundle-<run_id>` 与 `maven-publication-<run_id>-<attempt>` 中。
 
-## 失败判断
+npm 流程保存一次打包得到的 tarball 及身份记录，按 workspace 区分产物，发布 job 下载准确 artifact ID。记录绑定仓库、tag、commit、workspace 和原 tarball 的 SHA-512；使用者无需计算内部 artifact 名称。上传和核验使用同一 tarball；registry 中已有相同版本时，只有 integrity 与原文件一致才继续，否则失败，不覆盖已有版本。
 
-先检查原运行的 `Deploy once and wait for publication` 步骤：
+Artifacts 的保留期以工作流配置为准。应保存恢复所需的原运行 ID、tag、commit 和 deployment ID，并在 artifact 过期前处理失败。构建成功、上传响应、registry 状态或 GitHub Release 单独存在，都不能代替所需公开核验。
 
-| 情况 | 处理 |
-| --- | --- |
-| 所有此前 attempt 的 deploy 步骤均唯一且明确为 `skipped` | 排除原因后可完整重跑，仍使用原 tag 指向的 commit |
-| deploy 已进入，或历史不足以排除进入 | 停止重部署，核查原 deployment 和公开制品；非零退出码不证明未上传 |
-| Central 已发布，后续核验或 Release 失败 | 保留原部署，按原证据处理失败阶段，不再次 deploy |
-| 原计划、bundle、公钥或部署证据缺失/过期 | 人工核查剩余日志与 Central 状态，不以重新构建替代原 bundle |
+## Maven 失败恢复
 
-从 `maven-deploy.log`、`release-evidence.json` 和 Central Portal 核对 deployment UUID/name。新计划的 `deploymentName` 为 `<repository>-<version>`；精确查询使用 deployment ID，仅在日志中识别到唯一 UUID 时自动记录。
+首次构建、签名、归档或上传前的准备失败时，可在原 Actions run 重新运行失败 job 或全部 job。工作流通过 GitHub 的 attempt 记录确认先前发布 job 或实际上传步骤均未进入；只有得到明确证据后，才允许生成尚未保存的 bundle 并进行首次上传。已经保存的 bundle 始终复用，不因重跑而重新签名或构建。
 
-Maven 成功后，对 `PENDING`、`VALIDATING`、`PUBLISHING` 额外轮询最多 120 秒；失败后仅查询一次。`VALIDATED`、`FAILED` 或未知状态均停止流程，需人工调查。
+上传步骤一旦开始，失败或超时也可能已经到达 Central。先从原运行的 `publication.json`、日志和 Central Portal 核对 deployment ID，再使用以下查询恢复入口；不通过重新上传判断先前上传是否成功。
 
-公开下载遇可重试错误最多尝试 6 次，间隔 10 秒，每次有超时；耗尽后按原 manifest 核查 URL、网络和内容。
+在本仓库重新派发 `release.yml`，选择 `component=maven-parent`，同时填写：
 
-### 注意事项
+| 输入              | 值                                   |
+| ----------------- | ------------------------------------ |
+| `recovery-tag`    | 原 annotated tag，不创建或移动新 tag |
+| `recovery-run-id` | 保存原 bundle 的 Actions run ID      |
+| `deployment-id`   | 对应的 Central deployment UUID       |
 
-- 同 tag 或同 commit 的其他发布 run 也会检查，删除重推 tag 无法绕过历史。
-- 缺失 deployment ID 不代表未上传；公开下载重试耗尽后不重新上传。
-- 工作流停止后不会持续后台监控。
+Maven 恢复使用原产物，跳过新发布所需的源码 CI、制品重建和 tag 创建；下载原 bundle 后仍核对原 run、仓库、tag、commit 与记录的共享工作流身份，只查询原部署并继续公开核验。独立消费者的手动恢复入口向共享工作流传入原 `tag`、`recovery-run-id` 和 `deployment-id`，不得伪装成新的 tag 发布。
+
+上传已进入或无法排除上传时，若 deployment ID 或原 bundle 缺失，先人工核查已完成阶段，不用重新构建替代原证据。Central 已发布但后续核验失败时，保留原部署。GitHub Release 收尾中断时可重跑对应 job；流程核对身份和已有附件，只补齐相符的缺失附件并发布草稿，保留已编辑正文。身份或附件冲突时停止，不覆盖既有内容，也不再次上传 Central。
+
+## npm 失败恢复
+
+在原 Actions run 重新运行失败 job 或全部 job。已有该 workspace 的 tarball 时，工作流复用准确 artifact ID，并核对原文件 integrity；registry 中同版本与原文件一致则继续验证，不一致则停止调查。
+
+首次构建或归档失败、尚未保存 tarball 时，只有 GitHub 记录能明确证明此前未进入该 workspace 的发布步骤，工作流才允许重新执行首次构建和打包。这一路径保留原 run、tag 和 commit 身份。
+
+发布已进入或结果不明，而原 tarball artifact 缺失或过期时，停止重建并核对 registry 与原日志。恢复必须使用原产物，不能重新打包冒充原发布文件，也不通过新 run 或删除已发布版本绕过检查。

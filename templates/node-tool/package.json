@@ -1,0 +1,29 @@
+{
+    "name": "my-node-tool",
+    "version": "1.0.0",
+    "private": true,
+    "type": "module",
+    "license": "Apache-2.0",
+    "engines": {
+        "node": ">=24.21.0 <25"
+    },
+    "scripts": {
+        "start": "node src/main.ts",
+        "build": "tsc --project tsconfig.build.json",
+        "format": "prettier . --write",
+        "format:check": "prettier . --check",
+        "lint": "eslint . --max-warnings 0",
+        "type-check": "tsc --noEmit",
+        "check": "npm run format:check && npm run lint && npm run type-check",
+        "verify": "npm run check && npm run build"
+    },
+    "devDependencies": {
+        "@allurx/js-config": "1.0.0",
+        "@types/node": "24.19.2",
+        "eslint": "10.12.0",
+        "jiti": "2.7.0",
+        "prettier": "3.9.10",
+        "typescript": "6.0.3"
+    },
+    "prettier": "@allurx/js-config/prettier"
+}

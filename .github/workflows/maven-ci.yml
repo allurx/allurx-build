@@ -1,65 +1,49 @@
 name: Maven CI
-
 on:
-  workflow_call:
-
+    workflow_call:
+        inputs:
+            working-directory:
+                description: Maven 工程相对仓库根目录的路径
+                type: string
+                default: .
+            java-version:
+                description: 执行项目构建的 JDK 版本
+                type: string
+                default: "25"
 permissions:
-  contents: read
-  actions: read
-
+    contents: read
 jobs:
-  verify:
-    name: Maven verify
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Resolve shared workflow revision
-        id: shared
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          test "$GITHUB_API_URL" = https://api.github.com
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
-            --header 'X-GitHub-Api-Version: 2026-03-10' | jq -er \
-            --argjson run "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" \
-            --arg path 'allurx/allurx-build/.github/workflows/maven-ci.yml' '
-            select(.id == $run and .run_attempt == $attempt)
-            | [.referenced_workflows[]? | select((.path | split("@")[0]) == $path)]
-            | if length == 1 and (.[0].sha | test("^[0-9a-f]{40}$"))
-              then .[0].sha else error("Expected one immutable shared workflow revision") end')"
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-      - name: Checkout shared build tools
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: allurx/allurx-build
-          ref: ${{ steps.shared.outputs.sha }}
-          path: .allurx-build
-          persist-credentials: false
-      - name: Checkout project
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: project
-          persist-credentials: false
-      - name: Set up build tools
-        uses: ./.allurx-build/.github/actions/setup
-        with:
-          maven: 'true'
-      - name: Verify release contents without signing
-        working-directory: project
-        run: |
-          timestamp="$(git show -s --format=%ct HEAD)"
-          mvn -B -ntp -Prelease -Dgpg.skip=true \
-            "-Dproject.build.outputTimestamp=$timestamp" clean verify
-      - name: Preserve build reports
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: maven-reports-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            project/**/target/surefire-reports/**
-            project/**/target/failsafe-reports/**
-          if-no-files-found: ignore
-          retention-days: 14
+    verify:
+        name: Maven verify
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            - name: Check out workflow tools
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: ${{ job.workflow_repository }}
+                  ref: ${{ job.workflow_sha }}
+                  path: .allurx-build
+                  persist-credentials: false
+            - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+              with:
+                  distribution: temurin
+                  java-version: ${{ inputs.java-version }}
+                  cache: maven
+            - uses: ./.allurx-build/actions/setup-maven
+            - name: Verify project
+              working-directory: ${{ inputs.working-directory }}
+              run: mvn -B -ntp clean verify
+            - name: Preserve test reports
+              if: always()
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: maven-reports-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: |
+                      **/target/surefire-reports/**
+                      **/target/failsafe-reports/**
+                  if-no-files-found: ignore
+                  retention-days: 14

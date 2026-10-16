@@ -1,0 +1,5 @@
+{
+    // 页面代码和工具配置分开检查，避免把浏览器对象与 Node.js 对象混在一起。
+    "files": [],
+    "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+}

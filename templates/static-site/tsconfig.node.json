@@ -1,0 +1,5 @@
+{
+    "extends": "@allurx/js-config/tsconfig/node",
+    // Vite 和 ESLint 配置在 Node.js 环境中运行。
+    "include": ["*.ts"]
+}

@@ -1,0 +1,34 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "description": "Shared dependency updates for Allurx projects.",
+    "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "security:minimumReleaseAgeNpm"],
+    "timezone": "Asia/Shanghai",
+    "schedule": ["before 8am on monday"],
+    "prConcurrentLimit": 5,
+    "platformAutomerge": false,
+    "automergeType": "pr",
+    "vulnerabilityAlerts": {
+        "prConcurrentLimit": 5,
+        "automerge": false
+    },
+    "packageRules": [
+        {
+            "description": "Merge routine upgrades only after all project checks pass.",
+            "matchUpdateTypes": ["patch", "minor", "digest"],
+            "automerge": true
+        },
+        {
+            "description": "Pre-1.0 minor versions can change public contracts.",
+            "matchCurrentVersion": "/^0\\./",
+            "matchUpdateTypes": ["minor"],
+            "groupName": null,
+            "automerge": false
+        },
+        {
+            "description": "Review shared build configuration and workflows as infrastructure changes.",
+            "matchPackageNames": ["@allurx/**", "io.allurx:maven-parent", "allurx/allurx-build"],
+            "groupName": "allurx build configuration",
+            "automerge": false
+        }
+    ]
+}

@@ -1,0 +1,175 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
+name: Cloudflare static site
+
+# 供站点仓库调用。检出的代码、分支信息和 GITHUB_TOKEN 都来自站点仓库。
+# 何时运行、是否取消旧运行，由站点仓库的工作流决定。
+on:
+    workflow_call:
+        inputs:
+            asset-directory:
+                description: 已经验证的部署资产目录，相对于调用方仓库根目录
+                required: true
+                type: string
+            production-url:
+                # GitHub 部署记录中的站点链接；实际域名仍需在 Wrangler 中配置。
+                description: 记录在生产部署中的公开站点地址
+                required: true
+                type: string
+            production-branch:
+                description: 允许通过 push 或 workflow_dispatch 部署已验证资产的分支
+                default: main
+                type: string
+            environment:
+                description: 保存部署凭据和保护规则的调用方 Environment
+                default: production
+                type: string
+
+permissions:
+    contents: read
+
+jobs:
+    # 先检查并构建站点，部署阶段直接使用这里的构建结果。
+    verify:
+        runs-on: ubuntu-24.04
+        timeout-minutes: 20
+        outputs:
+            # 用上传结果的 ID 指定部署文件，防止取错产物。
+            web_artifact_id: ${{ steps.web_artifact.outputs.artifact-id }}
+        steps:
+            - name: Check out caller repository
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Node.js
+              uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .node-version
+                  cache: npm
+
+            - name: Install dependencies
+              run: npm ci
+
+            # 站点的 verify 脚本必须完成构建，并生成 asset-directory 指定的目录。
+            - name: Verify project
+              run: npm run verify
+
+            - name: Validate asset directory
+              id: assets
+              env:
+                  ASSET_DIRECTORY: ${{ inputs.asset-directory }}
+              run: |
+                  node --input-type=module <<'NODE'
+                  import { appendFileSync, realpathSync, statSync } from "node:fs";
+                  import { isAbsolute, relative, resolve, sep } from "node:path";
+
+                  // 上传工具支持通配符和多行路径，这里只接受一个明确的目录。
+                  const input = process.env.ASSET_DIRECTORY;
+                  if (!input || input !== input.trim() || isAbsolute(input) || /[\r\n\\*?\[\]{}!]/.test(input)) {
+                      throw new Error("asset-directory must be one relative directory, without glob patterns.");
+                  }
+
+                  // 只允许仓库内的子目录，不能上传整个仓库或仓库外的文件。
+                  const workspace = realpathSync(process.env.GITHUB_WORKSPACE);
+                  const directory = resolve(workspace, input);
+                  const path = relative(workspace, directory);
+                  if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+                      throw new Error("asset-directory must be a directory inside the repository, not its root.");
+                  }
+                  // 目录必须已存在，目录及其父路径都不能是符号链接。
+                  if (realpathSync(directory) !== directory || !statSync(directory).isDirectory()) {
+                      throw new Error("asset-directory must contain only directories, without symbolic links.");
+                  }
+
+                  // 后续检查和上传都使用这个绝对路径。
+                  appendFileSync(process.env.GITHUB_OUTPUT, `directory=${directory}\n`);
+                  NODE
+
+            - name: Validate Cloudflare configuration
+              env:
+                  ASSET_DIRECTORY: ${{ steps.assets.outputs.directory }}
+              run: npm run deploy -- --dry-run --assets "$ASSET_DIRECTORY"
+
+            # 仅生产分支的 push 或显式派发会发布，PR 和其他分支只验证。
+            - name: Upload verified Web assets
+              if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_type == 'branch' && github.ref_name == inputs.production-branch
+              id: web_artifact
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: web-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ steps.assets.outputs.directory }}
+                  # .well-known 等以点开头的文件也会上传，目录里应只放公开内容。
+                  include-hidden-files: true
+                  if-no-files-found: error
+                  retention-days: 7
+
+    deploy:
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_type == 'branch' && github.ref_name == inputs.production-branch
+        needs: verify
+        runs-on: ubuntu-24.04
+        timeout-minutes: 10
+        # 使用站点仓库的 Environment 及其审批规则，生产凭据也保存在那里。
+        # 调用方使用 secrets: inherit；验证 job 不读取这个 Environment。
+        environment:
+            name: ${{ inputs.environment }}
+            url: ${{ inputs.production-url }}
+        steps:
+            - name: Check out caller repository
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - name: Set up Node.js
+              uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+              with:
+                  node-version-file: .node-version
+                  cache: npm
+
+            # 安装部署工具；实际上传使用已验证归档，不依赖此环境重新生成的文件。
+            - name: Install deployment dependencies
+              run: npm ci
+
+            # 单独存放下载文件，避免混入代码检出或依赖安装时产生的文件。
+            - name: Download verified Web assets
+              uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  artifact-ids: ${{ needs.verify.outputs.web_artifact_id }}
+                  path: ${{ runner.temp }}/web-assets
+                  # 文件直接放在 web-assets 中，不再增加一层以产物名称命名的目录。
+                  merge-multiple: true
+
+            # 等待审批期间可能有新提交；发布前再查一次，跳过已经过时的版本。
+            - name: Check deployment is still current
+              id: current
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+
+                  branch_head="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')"
+                  if [[ "$branch_head" == "$GITHUB_SHA" ]]; then
+                      echo "deploy=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "deploy=false" >> "$GITHUB_OUTPUT"
+                      echo "::notice::Skipping deployment because the branch has a newer commit."
+                  fi
+
+            - name: Deploy verified Web assets
+              if: steps.current.outputs.deploy == 'true'
+              env:
+                  CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+                  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+              run: |
+                  set -euo pipefail
+
+                  # 缺少凭据时说明配置位置，不让 CI 停在登录提示上。
+                  if [[ -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_API_TOKEN" ]]; then
+                      echo "::error::Configure CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN in the selected caller environment before deploying."
+                      exit 1
+                  fi
+
+                  # --assets 选用刚下载的文件，Worker 名称和域名仍从站点配置中读取。
+                  # 记录提交 SHA 和本次运行链接，方便在 Cloudflare 中确认发布了哪个版本。
+                  npm run deploy -- --assets "$RUNNER_TEMP/web-assets" --tag "$GITHUB_SHA" --message "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
