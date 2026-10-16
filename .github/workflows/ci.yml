@@ -32,3 +32,13 @@ jobs:
           java --version
           mvn --version
           node dist/release.js --help
+
+  dependabot-merge:
+    needs: build
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: ./.github/workflows/dependabot-merge.yml
+    with:
+      target-branch: main
+      allowed-ecosystems: '["github_actions"]'

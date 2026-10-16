@@ -15,6 +15,7 @@ jobs:
   verify:
     uses: allurx/allurx-build/.github/workflows/maven-ci.yml@main
 
+  # See docs/dependency-updates.md before changing the target branch or allowed ecosystems.
   dependabot-merge:
     needs: verify
     permissions:

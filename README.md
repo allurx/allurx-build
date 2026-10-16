@@ -5,7 +5,7 @@
 | 工作流 | 行为 |
 | --- | --- |
 | `maven-ci.yml` | 以 `release` profile 执行 `clean verify`，跳过签名 |
-| `dependabot-merge.yml` | 调用方验证通过后，按共同策略合并指向 `dev` 的常规 Dependabot PR |
+| `dependabot-merge.yml` | 调用方验证通过后，按共同策略合并常规 Dependabot PR，默认目标为 `dev` |
 | `maven-central-release.yml` | 校验发布身份，执行一次 Central 部署，核验公开制品，自动生成 GitHub Release |
 
 ## 接入
@@ -26,7 +26,7 @@ Central Token 需有目标 namespace 的发布权限，签名公钥需已分发�
 
 接入约定：
 
-- `main`、`.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时移除其触发项和示例中的 `dependabot-merge` job。
+- `main`、`.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时移除其触发项；自动合并的目标分支和生态范围按[依赖更新指南](docs/dependency-updates.md)设置。
 - 保留权限和并发配置；发布调用 job 的 `secrets: inherit` 用于规避 [actions/runner #4453](https://github.com/actions/runner/issues/4453) 报告的 Environment Secret 解析问题。
 - 在调用方配置 required CI checks 和正式 tag 的防修改、防删除规则。
 
@@ -37,7 +37,7 @@ Central Token 需有目标 namespace 的发布权限，签名公钥需已分发�
 
 ## 接口
 
-Maven CI 与自动合并无自定义 inputs、secrets 或 outputs。自动合并使用调用方事件与 `GITHUB_TOKEN`，接入权限及策略见[依赖更新指南](docs/dependency-updates.md)。发布仅接受 tag push：input `tag` 默认从事件读取，显式传入时须与事件一致；输出 `version`（不含 `v`）、`commit`、`release-url`。
+Maven CI 无自定义 inputs、secrets 或 outputs。自动合并通过 `target-branch` 选择目标分支，通过 `allowed-ecosystems` 限定已支持的生态，使用调用方事件与 `GITHUB_TOKEN`；默认值、接入权限及策略见[依赖更新指南](docs/dependency-updates.md)。发布仅接受 tag push：input `tag` 默认从事件读取，显式传入时须与事件一致；输出 `version`（不含 `v`）、`commit`、`release-url`。
 
 工具链、工作目录和 Maven 参数不可自定义。
 

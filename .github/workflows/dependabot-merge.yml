@@ -2,6 +2,15 @@ name: Dependabot merge
 
 on:
   workflow_call:
+    inputs:
+      target-branch:
+        description: Branch that eligible dependency pull requests may merge into.
+        type: string
+        default: dev
+      allowed-ecosystems:
+        description: JSON array selecting supported ecosystems (maven and github_actions).
+        type: string
+        default: '["maven","github_actions"]'
 
 jobs:
   dependabot-merge:
@@ -9,7 +18,7 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.base.ref == 'dev' &&
+      github.event.pull_request.base.ref == inputs.target-branch &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -24,16 +33,22 @@ jobs:
         id: policy
         env:
           DEPENDENCIES: ${{ steps.metadata.outputs.updated-dependencies-json }}
+          ALLOWED_ECOSYSTEMS: ${{ inputs.allowed-ecosystems }}
         run: |
           node --input-type=module <<'NODE'
           import { appendFileSync } from "node:fs";
 
           const updates = JSON.parse(process.env.DEPENDENCIES);
+          const allowedEcosystems = JSON.parse(process.env.ALLOWED_ECOSYSTEMS);
+          if (!Array.isArray(allowedEcosystems) || allowedEcosystems.length === 0 ||
+              allowedEcosystems.some((ecosystem) => !["maven", "github_actions"].includes(ecosystem))) {
+              throw new Error("allowed-ecosystems must be a non-empty JSON array containing only maven or github_actions.");
+          }
           const actionVersion = /^v?(0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
           const mavenVersion = /^(0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))+(?:-(jre|android))?$/;
           const eligible = updates.length > 0 && updates.every((update) => {
               const { dependencyName, packageEcosystem, updateType, prevVersion, newVersion } = update;
-              if (!["maven", "github_actions"].includes(packageEcosystem)) return false;
+              if (!allowedEcosystems.includes(packageEcosystem)) return false;
               if (dependencyName === "io.allurx:maven-parent" ||
                   dependencyName === "allurx/allurx-build" ||
                   dependencyName.startsWith("allurx/allurx-build/")) return false;
@@ -59,10 +74,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TARGET_BRANCH: ${{ inputs.target-branch }}
         run: |
           current_base="$(gh pr view "$PR_URL" --json baseRefName --jq .baseRefName)"
-          if [ "$current_base" != "dev" ]; then
-              echo "The pull request no longer targets dev; skipping automatic merge."
+          if [ "$current_base" != "$TARGET_BRANCH" ]; then
+              echo "The pull request no longer targets $TARGET_BRANCH; skipping automatic merge."
               exit 0
           fi
 
