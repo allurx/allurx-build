@@ -27,7 +27,7 @@ jobs:
               with:
                   node-version-file: .node-version
                   cache: npm
-            - name: Install native GnuPG on Windows
+            - name: Prepare native GnuPG on Windows
               timeout-minutes: 8
               if: runner.os == 'Windows'
               shell: pwsh
@@ -40,9 +40,9 @@ jobs:
                   if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne 'EA6F9DEE2CCCD83287432625B8B399173805ADD81D27067FCAF019C0C4DA1AD8') {
                       throw 'GnuPG installer checksum mismatch'
                   }
-                  Write-Host 'Installing verified native GnuPG 2.5.24'
-                  $installation = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$directory" -Wait -PassThru -WindowStyle Hidden
-                  if ($installation.ExitCode -ne 0) { throw "GnuPG installation failed: $($installation.ExitCode)" }
+                  # 完整解包原生程序与配套 DLL，不执行安装器或修改系统安装状态。
+                  7z.exe x $installer "-o$directory" -y
+                  if ($LASTEXITCODE -ne 0) { throw "GnuPG extraction failed: $LASTEXITCODE" }
                   $bin = Join-Path $directory 'bin'
                   $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
                   & "$bin\gpg.exe" --version
