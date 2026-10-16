@@ -19,7 +19,7 @@ type Metadata = {
   scm: { url: string; connection: string; developerConnection: string };
 };
 export type Module = Coordinates & { packaging: string; bodyPaths: string[]; metadata: Metadata };
-export type Model = { schemaVersion: 1; version: string; effectivePomSha256: string; modules: Module[]; bodyCount: number };
+export type Model = { schemaVersion: 2; version: string; effectivePomSha256: string; modules: Module[]; excludedModules: Coordinates[]; bodyCount: number };
 export type Manifest = Model & { bundleSha256: string; files: { path: string; size: number; sha256: string; kind: string }[] };
 
 const MAX_FILE = 512 * 1024 * 1024, MAX_TOTAL = 2 * 1024 * 1024 * 1024;
@@ -102,13 +102,21 @@ function bodyPaths(module: Coordinates & { packaging: string }): string[] {
 
 function checkReleaseConfiguration(project: Xml): void {
   const props = properties(project);
-  for (const key of ['maven.deploy.skip', 'maven.source.skip', 'maven.javadoc.skip', 'gpg.skip', 'skipPublishing', 'maven.test.skip', 'skipTests']) {
+  for (const key of ['maven.deploy.skip', 'maven.source.skip', 'maven.javadoc.skip', 'gpg.skip', 'maven.test.skip', 'skipTests']) {
     assert(!props[key] || ['', 'false'].includes(interpolate(props[key], props).toLowerCase()), `Release may not skip ${key}`);
   }
   for (const plugin of elements(project, 'build/plugins/plugin')) {
     const artifact = text(plugin, 'artifactId');
-    for (const config of [...elements(plugin, 'configuration'), ...elements(plugin, 'executions/execution/configuration')]) {
+    const configurations: { config: Xml; execution?: Xml }[] = [
+      ...elements(plugin, 'configuration').map(config => ({ config })),
+      ...elements(plugin, 'executions/execution').flatMap(execution => elements(execution, 'configuration').map(config => ({ config, execution }))),
+    ];
+    for (const { config, execution } of configurations) {
+      const additionalJar = execution && text(execution, 'id') !== '' && text(execution, 'id') !== 'default-jar'
+        && isDeepStrictEqual(values(execution, 'goals/goal'), ['jar']);
       for (const key of ['skip', 'skipPublishing', 'skipSource', 'skipDeploy', 'ignorePublishedComponents']) {
+        // Only Central's native per-module exclusion may skip publication.
+        if (key === 'skipPublishing' && artifact === 'central-publishing-maven-plugin') continue;
         assert(['', 'false'].includes(interpolate(text(config, key), props).toLowerCase()), `Release may not enable ${artifact}.${key}`);
       }
       for (const key of ['attach', 'failOnBuildFailure']) {
@@ -119,8 +127,9 @@ function checkReleaseConfiguration(project: Xml): void {
         if (Array.isArray(value)) return value.forEach(visit);
         for (const [key, item] of Object.entries(object(value))) {
           if (key === 'classifier') {
-            const expected = artifact === 'maven-source-plugin' ? 'sources' : artifact === 'maven-javadoc-plugin' ? 'javadoc' : '';
-            assert(typeof item === 'string' && ['', expected].includes(interpolate(item, props)), `Unsupported classifier: ${artifact}`);
+            const expected = artifact === 'maven-jar-plugin' && additionalJar ? ['sources', 'javadoc']
+              : artifact === 'maven-source-plugin' ? ['sources'] : artifact === 'maven-javadoc-plugin' ? ['javadoc'] : [];
+            assert(typeof item === 'string' && ['', ...expected].includes(interpolate(item, props)), `Unsupported classifier: ${artifact}`);
           } else visit(item);
         }
       };
@@ -130,7 +139,7 @@ function checkReleaseConfiguration(project: Xml): void {
   }
 }
 
-function checkPublisher(project: Xml, deploymentName: string): void {
+function checkPublisher(project: Xml, deploymentName: string): boolean {
   const plugins = elements(project, 'build/plugins/plugin').filter(p => text(p, 'artifactId') === 'central-publishing-maven-plugin');
   assert(plugins.length === 1, 'Expected exactly one active Central publishing plugin');
   const plugin = plugins[0]!;
@@ -143,12 +152,13 @@ function checkPublisher(project: Xml, deploymentName: string): void {
     centralBaseUrl: ['', 'https://central.sonatype.com', 'https://central.sonatype.com/'], publishingServerId: ['', 'central'],
     outputDirectory: [''], outputFilename: ['', 'central-bundle.zip'], stagingDirectory: [''], deferredDirectory: [''], centralSnapshotsUrl: [''],
     autoPublish: ['', 'true', '${autoPublish}'], waitUntil: ['', 'published', '${waitUntil}'], deploymentName: ['', '${deploymentName}', deploymentName],
-    checksums: ['', 'all', 'required'], skipPublishing: ['', 'false'], ignorePublishedComponents: ['', 'false'], failOnBuildFailure: ['', 'true'], excludeArtifacts: [''],
+    checksums: ['', 'all', 'required'], skipPublishing: ['', 'false', 'true'], ignorePublishedComponents: ['', 'false'], failOnBuildFailure: ['', 'true'], excludeArtifacts: [''],
   };
   const props = properties(project);
   const boundProperties = new Set([...Object.keys(accepted), 'publishCompletionPollInterval', 'waitForPublishCompletion', 'waitMaxTime', 'waitPollingInterval']);
   const settings = [...Object.entries(props).filter(([key]) => boundProperties.has(key)),
     ...elements(plugin, 'configuration').flatMap(Object.entries), ...elements(execution, 'configuration').flatMap(Object.entries)];
+  const skipValues = new Set<string>();
   for (const [key, raw] of settings) {
     assert(typeof raw === 'string', `Unsupported structured Central setting: ${key}`);
     let value = interpolate(raw, props);
@@ -156,10 +166,13 @@ function checkPublisher(project: Xml, deploymentName: string): void {
       const minimum = key === 'waitMaxTime' ? 1800 : 5, maximum = key === 'waitMaxTime' ? 7200 : 60;
       assert(/^\d+$/.test(value) && Number(value) >= minimum && Number(value) <= maximum, `Unsupported Central retry setting: ${key}`);
     } else {
-      if (['checksums', 'waitUntil'].includes(key) && !value.startsWith('${')) value = value.toLowerCase();
+      if (['checksums', 'waitUntil', 'skipPublishing'].includes(key) && !value.startsWith('${')) value = value.toLowerCase();
       assert(accepted[key]?.includes(value), `Unsupported production Central configuration: ${key}`);
+      if (key === 'skipPublishing') skipValues.add(value || 'false');
     }
   }
+  assert(skipValues.size <= 1, 'Conflicting Central skipPublishing settings');
+  return skipValues.has('true');
 }
 
 /** Parse the complete effective reactor before release credentials become available. */
@@ -170,12 +183,12 @@ export async function readModel(effectivePath: string, version: string, deployme
   const projects = Object.hasOwn(root, 'project') ? elements(root, 'project') : elements(root, 'projects/project');
   assert(projects.length > 0, 'Effective POM contains no reactor projects');
   const seen = new Set<string>();
-  const modules = projects.map(project => {
+  const reactor = projects.map(project => {
     const module: Module = { groupId: text(project, 'groupId'), artifactId: text(project, 'artifactId'), version: text(project, 'version'), packaging: text(project, 'packaging', 'jar'), bodyPaths: [], metadata: metadata(project) };
     const label = GAV.map(k => module[k]).join(':');
     assert(module.version === version && !seen.has(label), `Mixed or duplicate reactor coordinates: ${label}`);
     seen.add(label); module.bodyPaths = bodyPaths(module); checkMetadata(module.metadata, label); checkReleaseConfiguration(project);
-    checkPublisher(project, deploymentName);
+    const excluded = checkPublisher(project, deploymentName);
     const versions = (value: unknown): void => {
       if (Array.isArray(value)) return value.forEach(versions);
       for (const [key, item] of Object.entries(object(value))) {
@@ -184,10 +197,30 @@ export async function readModel(effectivePath: string, version: string, deployme
       }
     };
     for (const [key, value] of Object.entries(project)) if (!['profiles', 'properties'].includes(key)) versions({ [key]: value });
-    return module;
+    return { project, module, excluded };
   });
   assert(projects.reduce((count, project) => count + values(project, 'modules/module').length, 0) === projects.length - 1, 'Effective POM is not the complete reactor; do not use -N or -pl');
-  return { schemaVersion: 1, version, effectivePomSha256: digest(data), modules, bodyCount: modules.reduce((n, m) => n + m.bodyPaths.length, 0) };
+
+  // Excluded modules are still built and tested, but cannot be required by a published component.
+  const excludedModules = reactor.filter(item => item.excluded).map(({ module: { groupId, artifactId, version } }) => ({ groupId, artifactId, version }));
+  const excludedCoordinates = new Set(excludedModules.map(module => GAV.map(k => module[k]).join(':')));
+  const published = reactor.filter(item => !item.excluded);
+  assert(published.length > 0, 'Reactor contains no publishable modules');
+  const references = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(references);
+    for (const [key, item] of Object.entries(object(value))) {
+      if (key === 'parent' || key === 'dependency') {
+        for (const reference of list(item)) {
+          const coordinate = GAV.map(k => text(object(reference), k)).join(':');
+          assert(!excludedCoordinates.has(coordinate), `Published module references excluded reactor component: ${coordinate}`);
+        }
+      }
+      if (!['profiles', 'properties'].includes(key)) references(item);
+    }
+  };
+  published.forEach(({ project }) => references(project));
+  const modules = published.map(item => item.module);
+  return { schemaVersion: 2, version, effectivePomSha256: digest(data), modules, excludedModules, bodyCount: modules.reduce((n, m) => n + m.bodyPaths.length, 0) };
 }
 
 function safePath(name: string, outer: boolean): string {
@@ -257,10 +290,18 @@ function rawPom(data: Uint8Array, label: string): { root: Xml; coordinates: Coor
   return { root, coordinates, props };
 }
 
-function checkJar(data: Uint8Array, path: string): void {
+function checkJar(data: Uint8Array, path: string, sourceLess: boolean): void {
   const entries = archive(data), names = [...entries.keys()];
   assert(names.length > 0, `Empty JAR: ${path}`);
-  if (path.endsWith('-sources.jar')) {
+  if (sourceLess) {
+    assert(!names.some(n => n.endsWith('.java') || n.endsWith('.class')), `Source-less JAR contains Java code: ${path}`);
+    if (path.endsWith('-sources.jar') || path.endsWith('-javadoc.jar')) {
+      const readme = names.find(n => /^README(?:\.(?:md|txt))?$/i.test(n));
+      assert(readme && new TextDecoder('utf-8', { fatal: true }).decode(entries.get(readme)).trim(), `Source-less companion JAR lacks a README: ${path}`);
+    } else {
+      assert(entries.get('META-INF/MANIFEST.MF')?.length, `Source-less main JAR lacks a manifest: ${path}`);
+    }
+  } else if (path.endsWith('-sources.jar')) {
     const sources = names.filter(n => n.endsWith('.java') && Buffer.from(entries.get(n)!).toString('utf8').trim());
     assert(sources.includes('module-info.java') && sources.some(n => !['module-info.java', 'package-info.java'].includes(n.split('/').at(-1)!)), `Sources JAR lacks JPMS descriptor or sources: ${path}`);
   } else if (path.endsWith('-javadoc.jar')) {
@@ -278,7 +319,7 @@ function checkJar(data: Uint8Array, path: string): void {
 
 /** Bind actual signed ZIP bytes to every expected reactor component. */
 export async function inspectBundle(bundlePath: string, model: Model): Promise<Manifest> {
-  assert(model.schemaVersion === 1 && model.modules?.length > 0, 'Unsupported or empty reactor model');
+  assert(model.schemaVersion === 2 && model.modules?.length > 0 && Array.isArray(model.excludedModules), 'Unsupported or empty reactor model');
   releaseVersion(model.version);
   const bodies = new Map<string, Module>();
   for (const module of model.modules) {
@@ -288,6 +329,13 @@ export async function inspectBundle(bundlePath: string, model: Model): Promise<M
     assert(isDeepStrictEqual(paths, module.bodyPaths), 'Stored module paths differ from coordinates');
     for (const path of paths) { assert(!bodies.has(path), `Duplicate model body: ${path}`); bodies.set(path, module); }
   }
+  const coordinates = new Set(model.modules.map(module => GAV.map(k => module[k]).join(':')));
+  for (const module of model.excludedModules) {
+    const coordinate = GAV.map(k => module[k]).join(':');
+    assert(module.version === model.version && !coordinates.has(coordinate), 'Mixed, duplicate or published excluded module');
+    bodyPaths({ ...module, packaging: 'pom' });
+    coordinates.add(coordinate);
+  }
   const required = new Set(bodies.keys()), allowed = new Set(bodies.keys());
   for (const body of bodies.keys()) {
     for (const suffix of ['.asc', '.md5', '.sha1']) required.add(body + suffix);
@@ -296,6 +344,9 @@ export async function inspectBundle(bundlePath: string, model: Model): Promise<M
   }
   const bytes = await readFile(bundlePath), data = archive(bytes, true);
   assert([...required].every(p => data.has(p)) && [...data.keys()].every(p => allowed.has(p)), 'Bundle contents differ from reactor model');
+  // Classless starters still require all signed companion artifacts; code libraries keep the JPMS checks.
+  const sourceLess = new Set(model.modules.filter(module => module.packaging === 'jar'
+    && ![...archive(data.get(module.bodyPaths[1]!)!).keys()].some(name => name.endsWith('.class'))));
   const files = [...data].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path, content]) => {
     assert(content.length > 0, `Empty bundle file: ${path}`);
     const suffix = path.split('.').at(-1)!;
@@ -310,10 +361,10 @@ export async function inspectBundle(bundlePath: string, model: Model): Promise<M
     } else if (suffix === 'pom') {
       const { root, coordinates } = rawPom(content, path), module = bodies.get(path)!;
       assert(GAV.every(k => coordinates[k] === module[k]) && text(root, 'packaging', 'jar') === module.packaging, `POM coordinates/packaging differ: ${path}`);
-    } else checkJar(content, path);
+    } else checkJar(content, path, sourceLess.has(bodies.get(path)!));
     return { path, size: content.length, sha256: digest(content), kind };
   });
-  return { schemaVersion: 1, version: model.version, effectivePomSha256: model.effectivePomSha256, modules: model.modules, bodyCount: bodies.size, bundleSha256: digest(bytes), files };
+  return { schemaVersion: 2, version: model.version, effectivePomSha256: model.effectivePomSha256, modules: model.modules, excludedModules: model.excludedModules, bodyCount: bodies.size, bundleSha256: digest(bytes), files };
 }
 
 async function boundManifest(bundlePath: string, manifest: Manifest): Promise<void> {

@@ -171,6 +171,7 @@ function releaseReport(plan: Plan, contents: Manifest, verification: JsonObject,
     signing: { fingerprint: plan.signingFingerprint, publicKey: 'signing-public-key.asc' },
     artifacts: {
       modules: contents.modules.map(({ groupId, artifactId, packaging }) => ({ groupId, artifactId, packaging })),
+      excludedModules: contents.excludedModules,
       files: contents.files,
     },
     verification: {

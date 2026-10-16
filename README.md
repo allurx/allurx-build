@@ -61,10 +61,12 @@ Node/npm 版本见 `package.json`，Actions 工具链见 `.github/actions/setup/
 npm ci --ignore-scripts
 npm run check
 npm run build
+npm test
 node dist/release.js --help
 ```
 
 ### 注意事项
 
+- `npm test` 使用当前 `dist/` 产物和原生 Node 测试，需本机 GPG；签名用例只使用临时隔离 keyring，公开下载通过测试替身验证。
 - 本地检查无需发布凭据，不验证真实 Actions 或 Central 发布。
 - `main` 是调用方的更新入口；变更须保持接口兼容，并同步示例和文档。

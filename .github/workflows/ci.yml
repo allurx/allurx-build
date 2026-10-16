@@ -32,6 +32,8 @@ jobs:
           java --version
           mvn --version
           node dist/release.js --help
+      - name: Verify publication artifacts
+        run: npm test
 
   dependabot-merge:
     needs: build
