@@ -54,7 +54,7 @@ bash scripts/verify-maven-parent.sh
 
 发布工具源码和测试由 Node.js 直接运行 TypeScript；根 `build` 只构建 JS Config。配置包独立清理和生成 JavaScript、类型声明，`prepack` 也会先执行该构建流程。Node 验证包含发布工具检查和配置包的真实 tarball 消费测试。
 
-签名测试需要可执行的 `gpg` 与 `gpgconf`。上传保护的 Bash 集成测试在 Linux CI 必须执行；Windows 本地通过 `ALLURX_TEST_BASH` 指定 Git Bash，并在 `PATH` 中提供 `jq`；未指定 Bash 时该项会标记为跳过。Java 验证脚本使用 Bash，将候选 parent 安装到隔离 Maven 仓库，并验证 Java 库和 Spring Boot 服务模板；实际产品仍需自己的编译、JPMS、测试和附件验证。完整 CI 入口见 [ci.yml](.github/workflows/ci.yml)。
+签名测试需要可执行的 `gpg` 与 `gpgconf`。Windows 需使用原生 GnuPG，并确保其 `bin` 目录位于 Git/MSYS 的目录之前。上传保护的 Bash 集成测试在 Linux CI 必须执行；Windows 本地通过 `ALLURX_TEST_BASH` 指定 Git Bash，并在 `PATH` 中提供 `jq`；未指定 Bash 时该项会标记为跳过。Java 验证脚本使用 Bash，将候选 parent 安装到隔离 Maven 仓库，并验证 Java 库和 Spring Boot 服务模板；实际产品仍需自己的编译、JPMS、测试和附件验证。完整 CI 入口见 [ci.yml](.github/workflows/ci.yml)。
 
 发布本仓库组件统一从 **Actions → Release build infrastructure** 选择组件，发版前复用同一套完整 CI，通过后才读取已审阅 manifest 的版本并创建 tag。流程和失败恢复见[发布指南](docs/release-guide.md)。本地检查不验证 GitHub Environment、npm Trusted Publisher、Central 凭据或线上部署状态。
 
