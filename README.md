@@ -36,7 +36,7 @@ jobs:
         uses: allurx/allurx-build/.github/workflows/maven-ci.yml@WORKFLOWS_COMMIT_SHA
 ```
 
-调用方定义触发事件、权限和并发策略，项目专有检查保留为自己的 job。将全部必要检查配置为 required checks；只有一个共享 `verify` 成功，不能代替调用方额外的集成或浏览器验证。
+调用方定义触发事件、权限和并发策略，项目专有检查保留为自己的 job。采用 PR 保护的发布分支应将全部必要验证配置为 required checks，包括额外的集成或浏览器检查。直接推送流程和开发分支沿用既有规则；接入共享 CI 不要求强制 PR 或新增绕过规则。所有必要 CI 仍须通过。
 
 配置包版本、父 POM 版本和工作流版本独立演进。安装包时选择 registry 中确实已发布的精确版本，工作流升级通过修改 SHA 进入审阅；不使用分支名承担可重复安装或发布的版本标识。
 

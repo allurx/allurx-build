@@ -10,7 +10,7 @@
 - 业务依赖、模块、文件范围、框架约定和专有交付逻辑留在消费者；普通 CI 与制品发布分开，接入 CI 不强制采用本库 parent。
 - 工作流与 preset、Maven parent、JS Config 分别使用各自 manifest 版本。改变公共入口时同步相关 README、[项目模板](templates/README.md)和消费者。
 - 消费者固定真实发行 commit SHA、registry 包的精确版本及锁文件。尚未发布时只使用真实 tarball 或隔离 Maven 仓库验证，不伪造 registry metadata、integrity 或可解析的工作流 SHA。
-- 依赖更新策略集中在 [default.json](default.json)。保持消费者完整 required checks；基础配置和共享工作流更新须人工审核，站点合并后由实际生产分支的 CI 验证并部署。
+- 依赖更新策略集中在 [default.json](default.json)。消费者的 CI 与分支保护遵循[接入说明](README.md#接入工作流)，全部必要验证仍须通过；基础配置和共享工作流更新须人工审核，站点合并后由实际生产分支的 CI 验证并部署。
 
 ## 验证与发布
 

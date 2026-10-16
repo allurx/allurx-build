@@ -7,10 +7,10 @@ Renovate 负责发现版本更新、创建 PR，并在项目检查通过后合�
 1. 为目标仓库安装并授权 Renovate GitHub App，完成 onboarding。
 2. 将 [Renovate 调用示例](../examples/renovate.json)复制为 `.github/renovate.json`，并纳入仓库默认分支。将 `extends` 固定到已发布的工作流版本；示例把更新 PR 发往 `dev`，直接在 `main` 开发时修改 `baseBranchPatterns`。共同策略由 preset 继承，项目只保留自己的目标分支和必要差异。
 
-3. 在 GitHub 为目标分支设置完整 required checks，覆盖所有验收 job，例如 Java 的 Maven 与浏览器验证，或站点的完整 `site / verify`。
+3. 核对目标分支的既有保护规则。采用 PR 保护的发布分支保留完整 required checks，例如 Kit 的 `verify / Maven verify` 与 `Selenium browser verification`、站点的 `site / verify`；仅生产部署时运行的 `site / deploy` 不属于 PR 必需检查。直接推送流程和开发分支保持原有规则，无需为接入 Renovate 强制 PR 或新增绕过规则。
 4. 在首次更新 PR 中核对目标分支、版本变更和完整检查，确认 Renovate 实际按共享策略运行。
 
-共享策略使用 `platformAutomerge: false`，由 Renovate 自身在检查通过后执行合并，分支保护继续约束合并结果。配置文件、App 授权和实际检查缺一不可；行为说明见 [Renovate 自动合并文档](https://docs.renovatebot.com/key-concepts/automerge/)。
+共享策略使用 `platformAutomerge: false`，并保留默认的 [`ignoreTests: false`](https://docs.renovatebot.com/configuration-options/#ignoretests)：Renovate 等待全部外部状态检查通过后再自行合并，不仅等待分支保护中列出的 required checks。既有分支保护继续约束合并结果；配置文件、App 授权和实际检查缺一不可。行为说明见 [Renovate 自动合并文档](https://docs.renovatebot.com/key-concepts/automerge/)。
 
 ## 常规版本更新
 
@@ -30,4 +30,4 @@ GitHub [Dependabot alerts](https://docs.github.com/en/code-security/concepts/sup
 
 站点依赖 PR 合入生产分支后，由该分支的正常 push CI 重新验证并部署实际提交。以 `dev` 开发的项目仍需正常集成到发布分支；依赖更新本身不创建版本 tag 或发布制品。项目无需在 CI 中另写合并脚本，部署使用生产分支同次运行的产物。
 
-检查失败、冲突或基础包升级需要兼容修改时，在 PR 中处理并重新验证准确 head。不要绕过 required checks、降低测试要求或把重新运行旧结果当作新版本验证。
+检查失败、冲突或基础包升级需要兼容修改时，在 PR 中处理并重新验证准确 head。不要绕过适用的 required checks、降低测试要求或把重新运行旧结果当作新版本验证。
