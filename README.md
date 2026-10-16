@@ -19,6 +19,10 @@ Allurx 项目的共享构建配置、GitHub Actions、依赖更新策略和起�
 
 共享工作流以 GitHub.com 为运行目标。Maven 和 npm 入口使用 GitHub.com 的 [workflow identity 上下文](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context)固定辅助工具来源，GitHub Enterprise Server 不在支持范围。
 
+完整的 [Maven CI 示例](examples/ci.yml)、[Maven 发布示例](examples/release.yml)和[静态站点模板](templates/static-site/README.md)已固定到正式 [v1.0.0](https://github.com/allurx/allurx-build/releases/tag/v1.0.0) 的完整 commit SHA。复制时无需重新查找 SHA，按项目配置分支、发布条件和部署目标即可。
+
+文档中的简短片段使用 `WORKFLOWS_COMMIT_SHA` 表示工作流版本。自行编写调用方或选择其他发行时：
+
 1. 在 [Releases](https://github.com/allurx/allurx-build/releases) 选择包含所需工作流的正式 `vX.Y.Z` 发行。
 2. 将下方 `WORKFLOW_TAG` 换成所选 tag，取得其指向的完整 40 位 commit SHA：
 
@@ -26,9 +30,9 @@ Allurx 项目的共享构建配置、GitHub Actions、依赖更新策略和起�
     gh api repos/allurx/allurx-build/commits/WORKFLOW_TAG --jq .sha
     ```
 
-3. 用输出的 SHA 替换示例或模板工作流中的 `WORKFLOWS_COMMIT_SHA`，并在同行注释记录对应 tag。占位符不是可运行引用。
+3. 将输出的 SHA 填入文档片段中的 `WORKFLOWS_COMMIT_SHA`，或替换已复制文件的 `uses` SHA，并在同行注释记录对应 tag。占位符不是可运行引用。
 
-Maven 工程可复制完整的 [CI 调用示例](examples/ci.yml)，按项目分支调整触发事件。其共享验证入口为：
+Maven 共享验证入口示意：
 
 ```yaml
 jobs:

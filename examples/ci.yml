@@ -1,4 +1,4 @@
-# 将 WORKFLOWS_COMMIT_SHA 替换为已审阅的 allurx-build 正式发行 commit。
+# 已固定 allurx-build 正式发行；按项目分支调整触发事件，升级时同步完整 SHA 与版本注释。
 name: CI
 on:
     pull_request:
@@ -10,4 +10,4 @@ permissions:
     contents: read
 jobs:
     verify:
-        uses: allurx/allurx-build/.github/workflows/maven-ci.yml@WORKFLOWS_COMMIT_SHA
+        uses: allurx/allurx-build/.github/workflows/maven-ci.yml@71684ece317c5344be9f5dae18f2512c88bc56b1 # v1.0.0

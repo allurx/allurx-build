@@ -1,4 +1,4 @@
-# 将 WORKFLOWS_COMMIT_SHA 替换为与 CI 相同的已审阅 allurx-build 发行 commit。
+# 已固定与 CI 相同的 allurx-build 正式发行；发布前配置项目的 maven-central Environment。
 name: Release
 on:
     push:
@@ -29,7 +29,7 @@ jobs:
         permissions:
             contents: write
             actions: read
-        uses: allurx/allurx-build/.github/workflows/maven-central-publish.yml@WORKFLOWS_COMMIT_SHA
+        uses: allurx/allurx-build/.github/workflows/maven-central-publish.yml@71684ece317c5344be9f5dae18f2512c88bc56b1 # v1.0.0
         secrets: inherit
         with:
             tag: ${{ inputs.tag || github.ref_name }}
