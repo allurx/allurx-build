@@ -28,16 +28,19 @@ jobs:
                   node-version-file: .node-version
                   cache: npm
             - name: Install native GnuPG on Windows
+              timeout-minutes: 8
               if: runner.os == 'Windows'
               shell: pwsh
               run: |
                   # Node 传入 Windows 路径，必须使用原生 GnuPG，不能使用 Git/MSYS 版本。
                   $installer = Join-Path $env:RUNNER_TEMP 'gnupg-w32-2.5.24_20260923.exe'
                   $directory = Join-Path $env:RUNNER_TEMP 'gnupg'
-                  Invoke-WebRequest 'https://gnupg.org/ftp/gcrypt/binary/gnupg-w32-2.5.24_20260923.exe' -OutFile $installer
+                  curl.exe --fail --location --retry 2 --connect-timeout 20 --max-time 120 --output $installer 'https://gnupg.org/ftp/gcrypt/binary/gnupg-w32-2.5.24_20260923.exe'
+                  if ($LASTEXITCODE -ne 0) { throw "GnuPG download failed: $LASTEXITCODE" }
                   if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne 'EA6F9DEE2CCCD83287432625B8B399173805ADD81D27067FCAF019C0C4DA1AD8') {
                       throw 'GnuPG installer checksum mismatch'
                   }
+                  Write-Host 'Installing verified native GnuPG 2.5.24'
                   $installation = Start-Process -FilePath $installer -ArgumentList '/S', "/D=$directory" -Wait -PassThru -WindowStyle Hidden
                   if ($installation.ExitCode -ne 0) { throw "GnuPG installation failed: $($installation.ExitCode)" }
                   $bin = Join-Path $directory 'bin'
