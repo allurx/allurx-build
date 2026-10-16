@@ -84,7 +84,7 @@ jobs:
           SHARED_WORKFLOW_SHA: ${{ steps.shared.outputs.sha }}
         run: node "${{ steps.tools.outputs.cli }}" prepare
       - name: Persist release plan before any upload to Central
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-plan-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-data/release-plan.json
@@ -121,7 +121,7 @@ jobs:
           if (( ${#bundles[@]} == 1 )); then cp -- "${bundles[0]}" "$RELEASE_DIR/bundle.zip"; fi
       - name: Preserve release evidence on success or failure
         if: always() && steps.prepare.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-evidence-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-data/
@@ -182,7 +182,7 @@ jobs:
         id: tools
         uses: ./.allurx-build/.github/actions/setup
       - name: Download producing attempt's release evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ needs.publish.outputs.artifact }}
           path: ${{ runner.temp }}/release-data
@@ -195,7 +195,7 @@ jobs:
         run: node "${{ steps.tools.outputs.cli }}" finish
       - name: Preserve public verification
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: public-verification-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
