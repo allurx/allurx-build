@@ -1,16 +1,17 @@
 # allurx-build
 
-可复用的 Maven CI 与发布工作流，适用于 GitHub.com 公开仓库。
+可复用的 Maven CI、Dependabot 自动合并与发布工作流，适用于 GitHub.com 公开仓库。
 
 | 工作流 | 行为 |
 | --- | --- |
 | `maven-ci.yml` | 以 `release` profile 执行 `clean verify`，跳过签名 |
+| `dependabot-merge.yml` | 调用方验证通过后，按共同策略合并指向 `dev` 的常规 Dependabot PR |
 | `maven-central-release.yml` | 校验发布身份，执行一次 Central 部署，核验公开制品，自动生成 GitHub Release |
 
 ## 接入
 
 1. 调用方根 POM 提供符合 [Maven 接入契约](docs/maven-contract.md) 的 `release` profile。
-2. 复制 [examples/ci.yml](examples/ci.yml) 和 [examples/release.yml](examples/release.yml) 到调用方 `.github/workflows/`。
+2. 复制 [examples/ci.yml](examples/ci.yml) 和 [examples/release.yml](examples/release.yml) 到调用方 `.github/workflows/`。需要自动创建依赖 PR 时，按[依赖更新指南](docs/dependency-updates.md)接入 Dependabot。
 3. 在调用方创建 `maven-central` Environment，允许 `v*` tag 部署，按需设置审批人，并配置：
 
    | 类型 | 名称 | 内容 |
@@ -25,18 +26,18 @@ Central Token 需有目标 namespace 的发布权限，签名公钥需已分发�
 
 接入约定：
 
-- `main`、`.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时可移除其触发项。
+- `main`、`.github/workflows/ci.yml` 和 `.github/workflows/release.yml` 参与历史查询，不能单独改名；没有 `dev` 时移除其触发项和示例中的 `dependabot-merge` job。
 - 保留权限和并发配置；发布调用 job 的 `secrets: inherit` 用于规避 [actions/runner #4453](https://github.com/actions/runner/issues/4453) 报告的 Environment Secret 解析问题。
 - 在调用方配置 required CI checks 和正式 tag 的防修改、防删除规则。
 
 ### 注意事项
 
 - `secrets: inherit` 向直接调用的工作流传递调用方可访问的全部 secrets，仅对可信工作流启用；Environment 绑定和审批仍由发布 job 执行，见 [GitHub 文档](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows#using-inputs-and-secrets-in-a-reusable-workflow)。
-- `@main` 跟随本仓库更新，每次运行按解析出的共享 SHA 检出工具并记录证据。CI 与发布独立运行，可能使用不同工具版本。
+- `@main` 跟随本仓库更新。Maven CI 与发布按本次解析的共享 SHA 检出工具并记录证据；各入口独立运行，可能使用不同共享版本。
 
 ## 接口
 
-CI 无自定义 inputs、secrets 或 outputs。发布仅接受 tag push：input `tag` 默认从事件读取，显式传入时须与事件一致；输出 `version`（不含 `v`）、`commit`、`release-url`。
+Maven CI 与自动合并无自定义 inputs、secrets 或 outputs。自动合并使用调用方事件与 `GITHUB_TOKEN`，接入权限及策略见[依赖更新指南](docs/dependency-updates.md)。发布仅接受 tag push：input `tag` 默认从事件读取，显式传入时须与事件一致；输出 `version`（不含 `v`）、`commit`、`release-url`。
 
 工具链、工作目录和 Maven 参数不可自定义。
 
@@ -50,7 +51,7 @@ CI 无自定义 inputs、secrets 或 outputs。发布仅接受 tag push：input 
 
 运行页面提供 job 日志；若生成 Surefire/Failsafe 报告，可下载 `maven-reports-<run_id>-<attempt>` artifact，保留 14 天。required checks 使用实际 CI 产生的名称。
 
-发布准备、tag 操作、结果核验和失败处理见 [发布指南](docs/release-guide.md)。
+常规依赖 PR 的创建、自动合并和失败处理见[依赖更新指南](docs/dependency-updates.md)。发布准备、tag 操作和结果核验见[发布指南](docs/release-guide.md)。
 
 ## 本地维护
 
