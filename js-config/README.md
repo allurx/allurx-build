@@ -83,10 +83,10 @@ Vite 配置使用 `mpa` 页面模式，不为未知路径提供 SPA 首页回退
 需要将项目许可证随网站交付时，显式启用 `projectLicense()`，以根目录的 `LICENSE.txt` 作为唯一维护源：
 
 ```ts
-import { mergeConfig } from "vite";
+import { defineConfig, mergeConfig } from "vite";
 import base, { projectLicense } from "@allurx/js-config/vite";
 
-export default mergeConfig(base, { plugins: [projectLicense()] });
+export default mergeConfig(base, defineConfig({ plugins: [projectLicense()] }));
 ```
 
 插件只在构建时将 Vite 最终 `root` 下的 `LICENSE.txt` 按原始字节写入输出根目录，不修改内容或换行；文件缺失或不可读时，构建失败并保留原始文件错误。自定义 `root` 后，许可证来源也随之改变，不再取配置文件或命令工作目录下的文件。默认配置不启用该插件；已有专有许可处理的项目可继续使用自身流程，第三方声明仍由项目按实际交付内容维护。
