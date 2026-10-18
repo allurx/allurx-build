@@ -4,12 +4,14 @@
 
 ## 项目准备
 
+新工程可从[静态站点模板](../templates/static-site/README.md)开始；已有工程按以下契约接入，保留自己的源码目录、workspace、构建插件、测试及交付方式，不需要用模板覆盖现有工程。
+
 - `.node-version` 指定 Node.js，提交 `package-lock.json`，让 `npm ci` 可重复安装。
 - `npm run verify` 完成项目验收和生产构建，生成唯一明确的公开资产目录。
 - `npm run deploy` 执行 `wrangler deploy`，只部署已有产物，不重新构建。
 - `wrangler.jsonc` 维护 Worker 名称、资源配置和域名；Wrangler 作为项目开发依赖固定版本。
 
-新工程可从[静态站点模板](../templates/static-site/README.md)开始。Workers 静态资源设置见 [Cloudflare 官方说明](https://developers.cloudflare.com/workers/static-assets/)。
+Workers 静态资源设置见 [Cloudflare 官方说明](https://developers.cloudflare.com/workers/static-assets/)。
 
 ## 凭据与调用
 
@@ -51,3 +53,9 @@ npm run deploy -- --dry-run
 ```
 
 `npm run deploy` 会实际发布，执行前须有部署授权。保留一个明确的自动部署入口，避免同时启用 Workers Builds 的 Git 触发器和 Actions 部署。依赖自动合并后的行为见[依赖更新指南](dependency-updates.md)。
+
+## 下载文件与响应变换
+
+Cloudflare 的自动统计或其他响应变换可能向 HTML 注入脚本。对于必须保持字节不变的自包含 HTML 下载，在对应的 [`_headers` 规则](https://developers.cloudflare.com/workers/static-assets/headers/)中设置 `Content-Disposition: attachment`，并在原有 `Cache-Control` 中加入 `no-transform`。例如，保留静态资源默认缓存语义时使用 `public, max-age=0, must-revalidate, no-transform`；不要将下载限制扩展到普通页面。Cloudflare 对自动统计注入的处理见[官方说明](https://developers.cloudflare.com/web-analytics/faq/#my-website-is-proxied-through-cloudflare-but-web-analytics-automatic-setup-is-not-working)。
+
+响应头规则须匹配重定向后的实际下载地址。部署后核对下载响应头，并将下载文件的 SHA-256 与同次 CI 的已验证产物比较；只检查构建目录中的文件，不能证明实际下载内容没有被改写。

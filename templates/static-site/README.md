@@ -25,6 +25,8 @@ npm run dev
 
 保存生成的 `package-lock.json`，以后安装使用 `npm ci`。页面写在 `index.html`，浏览器交互写在 [src/main.ts](src/main.ts)，不需要处理、只需原样复制的文件放在 `public/`。
 
+[public/_headers](public/_headers) 提供文件类型与来源信息的默认响应头，构建时原样复制到 `dist/`，由 Cloudflare 应用。缓存、页面嵌入和下载规则按站点需求配置；需要保持下载文件字节不变时，见[下载文件与响应变换](https://github.com/allurx/allurx-build/blob/main/docs/cloudflare-static-site.md#下载文件与响应变换)。
+
 检查、构建和部署工具由项目直接声明，`@allurx/js-config` 只提供共享配置及兼容性约束。[vite.config.ts](vite.config.ts)直接引用共享 Vite 配置，需要插件或项目设置时再用 Vite 的 `mergeConfig` 合并。其他设置在 [eslint.config.ts](eslint.config.ts)、[tsconfig.json](tsconfig.json)和 `package.json` 的 `prettier` 字段中，见 [JS Config 配置说明](https://github.com/allurx/allurx-build/blob/main/js-config/README.md)。ESLint 通过 `jiti` 加载 TypeScript 配置，配置文件也接受类型检查。
 
 ## 检查并预览网站
