@@ -1,3 +1,6 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
 # 已固定与 CI 相同的 allurx-build 正式发行；发布前配置项目的 maven-central Environment。
 name: Release
 on:

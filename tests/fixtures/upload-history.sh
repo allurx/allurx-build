@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
 set -euo pipefail
 
 # 只替换 GitHub 与 tag 查询，实际保护逻辑和 jq 处理仍由共享脚本执行。

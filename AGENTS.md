@@ -8,6 +8,7 @@
 - `maven-parent/` 维护 Maven 构建配置，`js-config/` 维护 JavaScript/TypeScript 工具配置；配置包不调用工作流，也不读取消费者的业务配置。
 - `.github/workflows/` 维护验证、发布与部署，`actions/` 只放需要复用的动作，`src/` 是发布工具源码。`js-config/dist/`、`node_modules/` 和模板生成物不手工修改或提交。
 - 业务依赖、模块、文件范围、框架约定和专有交付逻辑留在消费者；普通 CI 与制品发布分开，接入 CI 不强制采用本库 parent。
+- JS/TS 工程的默认命名、命令与配置组织遵循 [Node 接入约定](docs/node.md#默认结构与命令)，模板提供完整默认值；消费者只为真实的语言、运行环境或交付约束保留差异，不以已有写法作为例外依据。
 - 工作流与 preset、Maven parent、JS Config 分别使用各自 manifest 版本。改变公共入口时同步相关 README、[项目模板](templates/README.md)和消费者。
 - 消费者固定真实发行 commit SHA、registry 包的精确版本及锁文件。尚未发布时只使用真实 tarball 或隔离 Maven 仓库验证，不伪造 registry metadata、integrity 或可解析的工作流 SHA。
 - 依赖更新策略集中在 [default.json](default.json)。消费者的 CI 与分支保护遵循[接入说明](README.md#接入工作流)，全部必要验证仍须通过；基础配置和共享工作流更新须人工审核，站点合并后由实际生产分支的 CI 验证并部署。

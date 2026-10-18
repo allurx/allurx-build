@@ -1,3 +1,8 @@
+/*
+ * Copyright 2026 allurx
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

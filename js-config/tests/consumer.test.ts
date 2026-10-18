@@ -5,9 +5,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -347,6 +347,33 @@ export default mergeConfig(base, { root: "site", plugins: [projectLicense()] });
             run(directory, [executable(directory, "typescript", "bin/tsc"), "--project", "tsconfig.node.json"]);
             run(directory, ["prettier-export.ts"]);
         });
+
+        for (const template of ["node-tool", "static-site"]) {
+            await context.test(`${template} template verifies as an independent consumer`, () => {
+                const directory = join(temporary, `${template}-template`);
+                cpSync(join(root, "..", "templates", template), directory, {
+                    recursive: true,
+                    filter: (source) => !["node_modules", "dist", ".wrangler"].includes(basename(source)),
+                });
+
+                // 只替换待发布包的来源，其余配置、依赖和 verify 均使用真实模板。
+                const consumer = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as PackageManifest;
+                consumer.devDependencies[manifest.name] = `file:${tarball.replaceAll("\\", "/")}`;
+                write(directory, "package.json", `${JSON.stringify(consumer, null, 4)}\n`);
+                npm(directory, ["install", "--ignore-scripts", "--no-audit", "--no-fund"]);
+                npm(directory, ["run", "verify"]);
+
+                if (template === "node-tool") {
+                    run(directory, ["dist/main.js"]);
+                } else {
+                    assert.ok(existsSync(join(directory, "dist/index.html")));
+                    assert.deepEqual(
+                        readFileSync(join(directory, "dist/LICENSE.txt")),
+                        readFileSync(join(directory, "LICENSE.txt"))
+                    );
+                }
+            });
+        }
     } finally {
         rmSync(temporary, { recursive: true, force: true });
     }

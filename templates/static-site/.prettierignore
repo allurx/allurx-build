@@ -5,6 +5,4 @@
 # node_modules 已由 Prettier 默认排除。
 dist/
 .wrangler/
-
-# 许可证保留原有段落排版。
-public/LICENSE.txt
+package-lock.json

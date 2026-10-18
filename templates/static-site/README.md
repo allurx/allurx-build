@@ -11,7 +11,7 @@ SPDX-License-Identifier: Apache-2.0
 
 把本目录全部复制到新工程，隐藏文件也要保留。安装 [.node-version](.node-version) 指定的完整 Node.js LTS 版本，然后配置项目：
 
-1. 在 [package.json](package.json) 填写工程名称，在 [wrangler.jsonc](wrangler.jsonc) 填写 Worker 名称，在 [index.html](index.html) 修改标题和页面内容。
+1. 在 [package.json](package.json) 填写工程名称，在 [wrangler.jsonc](wrangler.jsonc) 填写 Worker 名称，在 [index.html](index.html) 修改标题和页面内容，并替换 [favicon](public/favicon.svg) 与 [404 页面](public/404.html)中的站点名称和视觉标识。
 2. 把 [CI](.github/workflows/ci.yml) 的 `production-url` 换成网站地址。它只决定部署记录中的链接；Worker 实际使用哪个域名，要在 Wrangler 配置中设置。
 
 CI 已固定正式工作流 `v1.0.0` 的完整 commit SHA，无需额外选择版本。保留 `secrets: inherit`；选择其他发行时，按[工作流接入步骤](https://github.com/allurx/allurx-build/blob/main/README.md#接入工作流)更新 SHA 与版本注释。配置包和开发工具使用 npm 精确版本，独立于工作流版本更新。
@@ -27,7 +27,9 @@ npm run dev
 
 [public/_headers](public/_headers) 提供文件类型与来源信息的默认响应头，构建时原样复制到 `dist/`，由 Cloudflare 应用。缓存、页面嵌入和下载规则按站点需求配置；需要保持下载文件字节不变时，见[下载文件与响应变换](https://github.com/allurx/allurx-build/blob/main/docs/cloudflare-static-site.md#下载文件与响应变换)。
 
-检查、构建和部署工具由项目直接声明，`@allurx/js-config` 只提供共享配置及兼容性约束。[vite.config.ts](vite.config.ts)直接引用共享 Vite 配置，需要插件或项目设置时再用 Vite 的 `mergeConfig` 合并。其他设置在 [eslint.config.ts](eslint.config.ts)、[tsconfig.json](tsconfig.json)和 `package.json` 的 `prettier` 字段中，见 [JS Config 配置说明](https://github.com/allurx/allurx-build/blob/main/js-config/README.md)。ESLint 通过 `jiti` 加载 TypeScript 配置，配置文件也接受类型检查。
+模板提供可替换的 SVG 图标和无需 JavaScript 的 404 页面，未知路径返回真实的 HTTP 404。站点地址与公开页面确定后，按实际内容生成 `robots.txt` 和 sitemap；需要安装体验时再增加 Web App Manifest 及相应图标。域名验证文件、下载规则及专用安全策略由项目按实际服务配置，不预置其他站点的值。
+
+检查、构建和部署工具由项目直接声明，`@allurx/js-config` 提供共享配置及兼容性约束。[vite.config.ts](vite.config.ts)通过 Vite 的 `mergeConfig` 合并共享默认值与项目插件。其他设置在 [eslint.config.ts](eslint.config.ts)、[tsconfig.json](tsconfig.json)和 `package.json` 的 `prettier` 字段中，见 [JS Config 配置说明](https://github.com/allurx/allurx-build/blob/main/js-config/README.md)。ESLint 通过 `jiti` 加载 TypeScript 配置，配置文件也接受类型检查；共同文件命名与命令语义见[工程约定](https://github.com/allurx/allurx-build/blob/main/docs/node.md#默认结构与命令)。
 
 ## 检查并预览网站
 
@@ -62,4 +64,4 @@ Node.js 运行时固定在本项目的 `.node-version` 和 `package.json` 的 `e
 
 ## 许可证
 
-模板采用 [Apache-2.0](LICENSE.txt)。`public/LICENSE.txt` 保留相同的许可证，构建时会和网站文件一起复制到 `dist/`。
+模板采用 [Apache-2.0](LICENSE.txt)。根 `LICENSE.txt` 是唯一维护源，Vite 的 `projectLicense()` 插件在构建时将其原样写入 `dist/LICENSE.txt`。保留模板已有的版权声明；新增内容使用实际权利人的声明，第三方代码和资源继续遵循各自许可。

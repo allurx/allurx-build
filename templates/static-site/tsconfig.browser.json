@@ -1,6 +1,7 @@
 {
     "extends": "@allurx/js-config/tsconfig/browser",
     "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.cache/typescript/tsconfig.browser.tsbuildinfo",
         // 让 TypeScript 认识 Vite 的资源导入和 import.meta.env。
         "types": ["vite/client"]
     },

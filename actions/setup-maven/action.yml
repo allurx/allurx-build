@@ -1,3 +1,6 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
 name: Set up Maven
 description: 在 Linux 上安装经过校验的共享 Apache Maven 发行包
 runs:

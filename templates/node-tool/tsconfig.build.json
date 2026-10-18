@@ -1,5 +1,5 @@
 {
-    "extends": "./tsconfig.json",
+    "extends": "@allurx/js-config/tsconfig/node",
     "compilerOptions": {
         "noEmit": false,
         "rewriteRelativeImportExtensions": true,

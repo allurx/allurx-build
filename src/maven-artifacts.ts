@@ -1,3 +1,8 @@
+/*
+ * Copyright 2026 allurx
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { createHash } from "node:crypto";
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

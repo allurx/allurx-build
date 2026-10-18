@@ -3,4 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { default } from "@allurx/js-config/vite";
+import { defineConfig, mergeConfig } from "vite";
+import base, { projectLicense } from "@allurx/js-config/vite";
+
+export default mergeConfig(base, defineConfig({ plugins: [projectLicense()] }));

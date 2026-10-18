@@ -1,3 +1,8 @@
+/*
+ * Copyright 2026 allurx
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";

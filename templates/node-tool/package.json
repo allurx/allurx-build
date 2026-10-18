@@ -13,12 +13,12 @@
         "format": "prettier . --write",
         "format:check": "prettier . --check",
         "lint": "eslint . --max-warnings 0",
-        "type-check": "tsc --noEmit",
+        "type-check": "tsc -b --noEmit",
         "check": "npm run format:check && npm run lint && npm run type-check",
         "verify": "npm run check && npm run build"
     },
     "devDependencies": {
-        "@allurx/js-config": "1.0.1",
+        "@allurx/js-config": "1.1.0",
         "@types/node": "24.19.2",
         "eslint": "10.12.0",
         "jiti": "2.7.0",

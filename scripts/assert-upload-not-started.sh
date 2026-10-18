@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
 set -euo pipefail
 
 publish_job="$1"
