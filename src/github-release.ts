@@ -31,6 +31,7 @@ interface ReleaseEvidence {
     directory: string;
     repository: string;
     tag: string;
+    version: string;
     commit: string;
     bundleSha256: string;
     fileCount: number;
@@ -149,7 +150,7 @@ export async function publishGithubRelease(evidence: ReleaseEvidence, fetcher = 
     release ??= (await request("/releases", "POST", {
         tag_name: tag,
         target_commitish: commit,
-        name: tag,
+        name: `v${evidence.version}`,
         body: `${marker}\n\n`,
         generate_release_notes: true,
         draft: true,

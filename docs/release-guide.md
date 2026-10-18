@@ -32,6 +32,8 @@ npm 发布使用 `npm` Environment 与 OIDC。首次创建包时，由有权且�
 | `maven-parent` | [maven-parent/pom.xml](../maven-parent/pom.xml)     | `maven-parent-vX.Y.Z` |
 | `js-config`    | [js-config/package.json](../js-config/package.json) | `js-config-vX.Y.Z`    |
 
+GitHub Release 的展示标题统一为 `vX.Y.Z`，不包含项目名、组件名或 `Release` 前缀；tag 仍按上表区分组件。
+
 工作流组件创建 GitHub Release；Maven parent 发布到 Central 并附上公开核验结果；JS Config 发布到标准 npm registry 并核对 registry 公布的 tarball integrity。消费者随后按自己的流程升级 parent/package 版本、锁文件或工作流完整 SHA，不能将本仓库发布成功表述为消费者已完成升级。
 
 ## 调用方发布 Maven 制品

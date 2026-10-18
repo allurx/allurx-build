@@ -32,19 +32,21 @@ interface FixtureState {
 
 interface CreateReleaseBody {
     tag_name: string;
+    name: string;
     body: string;
     draft: boolean;
     prerelease: boolean;
     generate_release_notes: boolean;
 }
 
-async function fixture(t: TestContext) {
+async function fixture(t: TestContext, tag = "v1.0.0") {
     const directory = await mkdtemp(join(tmpdir(), "allurx-github-release-"));
     t.after(() => rm(directory, { recursive: true, force: true }));
     const evidence = {
         directory,
         repository: "allurx/fixture",
-        tag: "v1.0.0",
+        tag,
+        version: "1.0.0",
         commit: "a".repeat(40),
         bundleSha256: "b".repeat(64),
         fileCount: 2,
@@ -162,6 +164,7 @@ await test("create a draft with generated notes, attach verified evidence, then 
     );
     assert.ok(create);
     const body = create.body as CreateReleaseBody;
+    assert.equal(body.name, "v1.0.0");
     assert.equal(body.draft, true);
     assert.equal(body.generate_release_notes, true);
     for (const value of [f.evidence.repository, f.evidence.tag, f.evidence.commit, f.evidence.bundleSha256])
@@ -173,6 +176,18 @@ await test("create a draft with generated notes, attach verified evidence, then 
     ]);
     assert.equal(f.release().draft, false);
     assert.match(f.release().body, /Generated notes remain intact/);
+});
+
+await test("a component tag keeps its identity while the Release title contains only the version", async (t) => {
+    const f = await fixture(t, "maven-parent-v1.0.0");
+    await f.finish();
+    const create = f.state.requests.find(
+        (request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/releases")
+    );
+    assert.ok(create);
+    const body = create.body as CreateReleaseBody;
+    assert.equal(body.tag_name, "maven-parent-v1.0.0");
+    assert.equal(body.name, "v1.0.0");
 });
 
 await test("recover a draft after its creation response was lost without creating another Release", async (t) => {
