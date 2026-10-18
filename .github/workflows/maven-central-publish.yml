@@ -309,7 +309,6 @@ jobs:
             release-url: ${{ steps.release.outputs.release-url }}
         env:
             RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-            TAG_PREFIX: ${{ inputs.tag-prefix }}
             RELEASE_DIR: ${{ github.workspace }}/release-data
         steps:
             - name: Check out the verified release tag

@@ -151,5 +151,5 @@ jobs:
                   if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName > release.json; then
                     jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false' release.json
                   else
-                    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$RELEASE_TAG"
+                    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "workflows $RELEASE_TAG"
                   fi

@@ -46,7 +46,6 @@ async function fixture(t: TestContext, tag = "v1.0.0") {
         directory,
         repository: "allurx/fixture",
         tag,
-        version: "1.0.0",
         commit: "a".repeat(40),
         bundleSha256: "b".repeat(64),
         fileCount: 2,
@@ -178,7 +177,7 @@ await test("create a draft with generated notes, attach verified evidence, then 
     assert.match(f.release().body, /Generated notes remain intact/);
 });
 
-await test("a component tag keeps its identity while the Release title contains only the version", async (t) => {
+await test("a component release identifies its component without changing the tag", async (t) => {
     const f = await fixture(t, "maven-parent-v1.0.0");
     await f.finish();
     const create = f.state.requests.find(
@@ -187,7 +186,7 @@ await test("a component tag keeps its identity while the Release title contains 
     assert.ok(create);
     const body = create.body as CreateReleaseBody;
     assert.equal(body.tag_name, "maven-parent-v1.0.0");
-    assert.equal(body.name, "v1.0.0");
+    assert.equal(body.name, "maven-parent v1.0.0");
 });
 
 await test("recover a draft after its creation response was lost without creating another Release", async (t) => {

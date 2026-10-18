@@ -243,7 +243,6 @@ async function main(): Promise<void> {
         const url = await publishGithubRelease({
             directory,
             ...expectedIdentity(),
-            version: releaseVersion(env("RELEASE_TAG"), env("TAG_PREFIX", "v")),
             bundleSha256: manifest.bundleSha256,
             fileCount: manifest.files.length,
             token: env("GH_TOKEN"),
