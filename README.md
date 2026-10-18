@@ -1,38 +1,44 @@
 # allurx-build
 
-Allurx 项目的共享构建配置、GitHub Actions、依赖更新策略和起步模板。项目按需要选择入口；使用共享 CI 不要求同时采用父 POM、配置包或某种部署方式。
+English | [简体中文](README.zh-CN.md)
 
-| 需要完成的工作                                 | 接入入口                                                                                                                                                            |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 统一 Java 库的编译、测试和发布配置             | [Maven parent](maven-parent/README.md)，通过 Maven Central 的 `io.allurx:maven-parent` 使用                                                                         |
-| 复用 ESLint、Prettier、TypeScript 或 Vite 配置 | [JS Config](js-config/README.md)，通过 npm registry 的 `@allurx/js-config` 使用                                                                                     |
-| 验证 Maven 工程                                | [maven-ci.yml](.github/workflows/maven-ci.yml)，执行项目的 `clean verify`                                                                                           |
-| 验证 Node.js 工程                              | [Node 接入说明](docs/node.md)与 [node-ci.yml](.github/workflows/node-ci.yml)                                                                                        |
-| 发布 Maven 或 npm 制品                         | [maven-central-publish.yml](.github/workflows/maven-central-publish.yml)、[npm-publish.yml](.github/workflows/npm-publish.yml)，见[发布指南](docs/release-guide.md) |
-| 部署 Cloudflare 静态站点                       | [cloudflare-static-site.yml](.github/workflows/cloudflare-static-site.yml)，见[部署说明](docs/cloudflare-static-site.md)                                            |
-| 定期更新依赖                                   | 根 [Renovate preset](default.json)，见[依赖更新指南](docs/dependency-updates.md)                                                                                    |
-| 新建工程                                       | [项目模板](templates/README.md)                                                                                                                                     |
+Shared build configuration, GitHub Actions, dependency update policies, and starter templates for Allurx projects. Adopt the components you need; using shared CI does not require the parent POM, configuration package, or a particular deployment method.
 
-业务依赖、模块、源码范围、产品构建和部署目标仍由项目维护。Spring Boot 应用可以保留官方 parent，只接入共享 Maven CI；纯 Node.js 工程可以只使用检查配置，不安装 Vite 或 Wrangler。
+Component guides, detailed documentation, and template READMEs linked below are in Simplified Chinese.
 
-## 接入工作流
+| Task                                                                           | Entry point                                                                                                                                                                       |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Standardize compilation, testing, and release configuration for Java libraries | [Maven parent](maven-parent/README.md), available as `io.allurx:maven-parent` on Maven Central                                                                                    |
+| Reuse ESLint, Prettier, TypeScript, or Vite configuration                      | [JS Config](js-config/README.md), available as `@allurx/js-config` on the npm registry                                                                                            |
+| Verify Maven projects                                                          | [maven-ci.yml](.github/workflows/maven-ci.yml), which runs the project's `clean verify`                                                                                           |
+| Verify Node.js projects                                                        | [Node integration guide](docs/node.md) and [node-ci.yml](.github/workflows/node-ci.yml)                                                                                           |
+| Publish Maven or npm artifacts                                                 | [maven-central-publish.yml](.github/workflows/maven-central-publish.yml) and [npm-publish.yml](.github/workflows/npm-publish.yml); see the [release guide](docs/release-guide.md) |
+| Deploy Cloudflare static sites                                                 | [cloudflare-static-site.yml](.github/workflows/cloudflare-static-site.yml); see the [deployment guide](docs/cloudflare-static-site.md)                                            |
+| Update dependencies regularly                                                  | The root [Renovate preset](default.json); see the [dependency update guide](docs/dependency-updates.md)                                                                           |
+| Start a project                                                                | [Project templates](templates/README.md)                                                                                                                                          |
 
-共享工作流以 GitHub.com 为运行目标。Maven 和 npm 入口使用 GitHub.com 的 [workflow identity 上下文](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context)固定辅助工具来源，GitHub Enterprise Server 不在支持范围。
+Each project retains its business dependencies, modules, source scope, product builds, and deployment targets. A Spring Boot application can keep the official parent and adopt only shared Maven CI. A Node.js project can use the checking configuration without installing Vite or Wrangler.
 
-完整的 [Maven CI 示例](examples/ci.yml)、[Maven 发布示例](examples/release.yml)和[静态站点模板](templates/static-site/README.md)已固定到正式 [v1.0.0](https://github.com/allurx/allurx-build/releases/tag/v1.0.0) 的完整 commit SHA。复制时无需重新查找 SHA，按项目配置分支、发布条件和部署目标即可。
+<a name="接入工作流"></a>
 
-文档中的简短片段使用 `WORKFLOWS_COMMIT_SHA` 表示工作流版本。自行编写调用方或选择其他发行时：
+## Integrating workflows
 
-1. 在 [Releases](https://github.com/allurx/allurx-build/releases) 选择包含所需工作流的正式 `vX.Y.Z` 发行。
-2. 将下方 `WORKFLOW_TAG` 换成所选 tag，取得其指向的完整 40 位 commit SHA：
+The shared workflows target GitHub.com. Maven and npm publishing use GitHub.com's [workflow identity context](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context) to pin the source of their helper tools. GitHub Enterprise Server is not supported.
+
+The complete [Maven CI example](examples/ci.yml), [Maven release example](examples/release.yml), and [static site template](templates/static-site/README.md) are pinned to the full commit SHA of the published [workflows v1.0.0](https://github.com/allurx/allurx-build/releases/tag/workflows-v1.0.0) release. Copy an example and configure the project's branches, release conditions, and deployment targets; there is no need to look up that SHA again.
+
+Short documentation snippets use `WORKFLOWS_COMMIT_SHA` as a placeholder for the workflow version. To write a caller yourself or select another release:
+
+1. Choose a published `workflows-vX.Y.Z` tag containing the required workflows from [Releases](https://github.com/allurx/allurx-build/releases).
+2. Replace `WORKFLOW_TAG` below with the selected tag to obtain its full 40-character commit SHA:
 
     ```sh
     gh api repos/allurx/allurx-build/commits/WORKFLOW_TAG --jq .sha
     ```
 
-3. 将输出的 SHA 填入文档片段中的 `WORKFLOWS_COMMIT_SHA`，或替换已复制文件的 `uses` SHA，并在同行注释记录对应 tag。占位符不是可运行引用。
+3. Use that SHA for `WORKFLOWS_COMMIT_SHA` in a snippet, or replace the `uses` SHA in a copied file. Record the corresponding tag in a comment on the same line. Placeholders are not runnable references.
 
-Maven 共享验证入口示意：
+Example shared Maven verification job:
 
 ```yaml
 jobs:
@@ -40,15 +46,15 @@ jobs:
         uses: allurx/allurx-build/.github/workflows/maven-ci.yml@WORKFLOWS_COMMIT_SHA
 ```
 
-调用方定义触发事件、权限和并发策略，项目专有检查保留为自己的 job。采用 PR 保护的发布分支应将全部必要验证配置为 required checks，包括额外的集成或浏览器检查。直接推送流程和开发分支沿用既有规则；接入共享 CI 不要求强制 PR 或新增绕过规则。所有必要 CI 仍须通过。
+The caller defines events, permissions, and concurrency. Keep project-specific checks in their own jobs. Release branches protected by pull requests should require every necessary check, including additional integration or browser tests. Direct-push workflows and development branches retain their existing rules; adopting shared CI does not require mandatory pull requests or new bypass rules. All required CI checks must still pass.
 
-配置包版本、父 POM 版本和工作流版本独立演进。安装包时选择 registry 中确实已发布的精确版本，工作流升级通过修改 SHA 进入审阅；不使用分支名承担可重复安装或发布的版本标识。
+The configuration package, parent POM, and workflows have independent versions. Install exact versions that are actually published in the registry, and review workflow upgrades as SHA changes. Do not use branch names as version identifiers for reproducible installation or publishing.
 
-## 本地维护
+## Local maintenance
 
-Node.js 版本以 [.node-version](.node-version) 为准，根目录通过 npm workspaces 管理 [js-config](js-config/package.json)。Maven 分发版本与校验在 [setup-maven](actions/setup-maven/action.yml) 中维护，Java 构建要求见[父 POM](maven-parent/pom.xml)。
+Use the Node.js version in [.node-version](.node-version). The root project manages [js-config](js-config/package.json) through npm workspaces. The Maven distribution version and checksum are maintained in [setup-maven](actions/setup-maven/action.yml); Java build requirements are defined by the [parent POM](maven-parent/pom.xml).
 
-在仓库根目录执行：
+From the repository root, run:
 
 ```sh
 npm ci --ignore-scripts
@@ -56,12 +62,12 @@ npm run verify
 bash scripts/verify-maven-parent.sh
 ```
 
-发布工具源码和测试由 Node.js 直接运行 TypeScript；根 `build` 只构建 JS Config。配置包独立清理和生成 JavaScript、类型声明，`prepack` 也会先执行该构建流程。Node 验证包含发布工具检查和配置包的真实 tarball 消费测试。
+Node.js runs the release tools and their tests directly from TypeScript. The root `build` only builds JS Config. The configuration package independently cleans and generates its JavaScript and type declarations; `prepack` also runs that build first. Node verification includes the release tool checks and consumer tests using a real configuration package tarball.
 
-签名测试需要可执行的 `gpg` 与 `gpgconf`。Windows 需使用原生 GnuPG，并确保其 `bin` 目录位于 Git/MSYS 的目录之前。上传保护的 Bash 集成测试在 Linux CI 必须执行；Windows 本地通过 `ALLURX_TEST_BASH` 指定 Git Bash，并在 `PATH` 中提供 `jq`；未指定 Bash 时该项会标记为跳过。Java 验证脚本使用 Bash，将候选 parent 安装到隔离 Maven 仓库，并验证 Java 库和 Spring Boot 服务模板；实际产品仍需自己的编译、JPMS、测试和附件验证。完整 CI 入口见 [ci.yml](.github/workflows/ci.yml)。
+Signing tests require executable `gpg` and `gpgconf` commands. On Windows, use native GnuPG and put its `bin` directory before Git/MSYS directories in `PATH`. The Bash integration tests for upload safeguards must run in Linux CI. On Windows, set `ALLURX_TEST_BASH` to Git Bash and provide `jq` in `PATH`; without an explicit Bash path, that test is marked as skipped. The Java verification script uses Bash, installs the candidate parent into an isolated Maven repository, and verifies the Java library and Spring Boot service templates. Actual products still need their own compilation, JPMS, tests, and artifact checks. See [ci.yml](.github/workflows/ci.yml) for the complete CI entry point.
 
-发布本仓库组件统一从 **Actions → Release build infrastructure** 选择组件，发版前复用同一套完整 CI，通过后才读取已审阅 manifest 的版本并创建 tag。流程和失败恢复见[发布指南](docs/release-guide.md)。本地检查不验证 GitHub Environment、npm Trusted Publisher、Central 凭据或线上部署状态。
+To publish a component from this repository, select it under **Actions → Release build infrastructure**. The workflow reuses the complete CI checks before reading the version from the reviewed manifest and creating the tag. See the [release guide](docs/release-guide.md) for the procedure and failure recovery. Local checks do not verify GitHub Environments, npm Trusted Publisher configuration, Central credentials, or production deployments.
 
-## 许可证
+## License
 
-[Apache-2.0](LICENSE.txt)。
+[Apache-2.0](LICENSE.txt).
