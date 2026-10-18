@@ -18,6 +18,8 @@
 
 一次发布只生成一个 `target/central-publishing/central-bundle.zip`。POM 元数据、坐标、sources/Javadoc 和发布资格遵循 [Maven Central 要求](https://central.sonatype.org/publish/requirements/)；Maven 插件与 Central 负责模型语义和服务端校验，共享工具不实现第二套 Maven 模型解释器。
 
+主 JAR、sources 和 Javadoc 等独立分发产物应携带完整项目许可及适用的第三方声明；POM 中的许可链接不能代替产物核对。使用本库 parent 时，按[许可证与资源约定](../maven-parent/README.md#许可证与资源)维护许可来源；自行提供构建配置的工程保留等价保障。
+
 上传前，共享工具检查 bundle 路径、重复条目和解压大小，核对已有校验文件，要求制品具有对应签名，并使用指定 GPG 指纹验签。manifest 记录 bundle 摘要以及每个文件的路径、大小和 SHA-256，并绑定仓库、tag、commit 与共享工具版本。
 
 Central 返回 `PUBLISHED` 后，流程从公开 Maven 仓库逐个下载原 manifest 中的文件，核对大小和摘要，再生成公开验证结果。该检查证明发布字节与保存的 bundle 一致，不能替代 API、JPMS、Javadoc 内容或应用行为测试。

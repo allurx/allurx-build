@@ -1,6 +1,6 @@
 # Java 库模板
 
-使用 JDK 25 和 Maven 3.9.x。复制本目录后，设置自己的 Maven 坐标、项目元数据和 Java 包名，并用实际 API 替换 `Library` 示例类型。
+使用 JDK 25 和 Maven 3.9.x。复制本目录时保留 `.mvn/` 隐藏目录，设置自己的 Maven 坐标、项目元数据和 Java 包名，并用实际 API 替换 `Library` 示例类型。
 
 ```sh
 mvn -B -ntp clean verify
@@ -15,4 +15,4 @@ mvn -B -ntp -Prelease "-Dgpg.skip=true" clean verify
 
 ## 许可证
 
-模板采用 [Apache-2.0](LICENSE.txt)。Maven 将同一份许可证复制到主 JAR、sources 和 Javadoc JAR 的 `META-INF/`，不需要另行维护副本。
+模板采用 [Apache-2.0](LICENSE.txt)。共享 parent 将同一份许可证复制到主 JAR、sources 和 Javadoc JAR 的 `META-INF/`，不需要另行维护副本。已有 `NOTICE.txt` 和 `THIRD-PARTY-NOTICES.txt` 也会随包交付；多模块与额外资源配置见 [parent 的许可证约定](../../maven-parent/README.md#许可证与资源)。
