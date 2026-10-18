@@ -1,4 +1,7 @@
 {
     "extends": "./tsconfig/tsconfig.node.json",
+    "compilerOptions": {
+        "tsBuildInfoFile": "./node_modules/.cache/typescript/tsconfig.tsbuildinfo"
+    },
     "include": ["*.ts", "configs/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
 }

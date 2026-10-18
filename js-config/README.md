@@ -51,6 +51,17 @@ export default defineConfig(globalIgnores(["dist/"]), base, {
 
 这些 TypeScript 配置默认只查错。需要编译 Node.js 产物时，由项目在构建配置中设置 `noEmit: false`、输出目录，以及与导入方式对应的扩展名重写选项。
 
+需要 TypeScript 7 原生编译器时，按[微软的并行安装方案](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-60)使用 npm 别名，保留 ESLint 所需的 TypeScript 6 API。例如在 `devDependencies` 中设置：
+
+```json
+{
+    "@typescript/native": "npm:typescript@7.0.2",
+    "typescript": "npm:@typescript/typescript6@6.0.2"
+}
+```
+
+此时项目脚本仍调用 `tsc`，由 TypeScript 7 执行类型检查；兼容包提供 `tsc6` 和 TypeScript 6 API，避免两个版本争用 `tsc`。升级时核对实际锁文件，并运行项目完整验证。
+
 ## Prettier 与 Vite
 
 使用 Prettier 时，在项目 `package.json` 中设置：
@@ -69,8 +80,19 @@ export { default } from "@allurx/js-config/vite";
 
 Vite 配置使用 `mpa` 页面模式，不为未知路径提供 SPA 首页回退。浏览器语法转换沿用 Vite 的 `baseline-widely-available` 目标，缺少的浏览器 API 仍需项目按使用范围处理。
 
+需要将项目许可证随网站交付时，显式启用 `projectLicense()`，以根目录的 `LICENSE.txt` 作为唯一维护源：
+
+```ts
+import { mergeConfig } from "vite";
+import base, { projectLicense } from "@allurx/js-config/vite";
+
+export default mergeConfig(base, { plugins: [projectLicense()] });
+```
+
+插件只在构建时将 Vite 最终 `root` 下的 `LICENSE.txt` 按原始字节写入输出根目录，不修改内容或换行；文件缺失或不可读时，构建失败并保留原始文件错误。自定义 `root` 后，许可证来源也随之改变，不再取配置文件或命令工作目录下的文件。默认配置不启用该插件；已有专有许可处理的项目可继续使用自身流程，第三方声明仍由项目按实际交付内容维护。
+
 ## 维护
 
-在仓库根目录按 workspace 运行本包的 `verify`。检查包含源码检查，以及将真实 npm tarball 安装到仓库外的 Node.js、浏览器消费验证。`prepack` 生成 JavaScript 和类型声明；registry 安装直接读取这些产物，不执行构建生命周期。
+在仓库根目录按 workspace 运行本包的 `verify`。检查包含源码检查，以及将真实 npm tarball 安装到仓库外的 Node.js、浏览器消费验证，同时覆盖 TypeScript 最低支持版本和 TypeScript 7 与 TypeScript 6 API 别名并用。`prepack` 生成 JavaScript 和类型声明；registry 安装直接读取这些产物，不执行构建生命周期。
 
 许可证为 [Apache-2.0](LICENSE.txt)。

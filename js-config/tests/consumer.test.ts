@@ -53,13 +53,14 @@ function write(directory: string, path: string, contents: string): void {
     writeFileSync(destination, contents);
 }
 
-function install(directory: string, tarball: string, tools: string[]): void {
+function install(directory: string, tarball: string, tools: string[], overrides: Record<string, string> = {}): void {
     const devDependencies: Record<string, string> = { [manifest.name]: `file:${tarball.replaceAll("\\", "/")}` };
     for (const tool of tools) {
         const version = manifest.devDependencies[tool];
         assert.ok(version, `${tool} must use the package's tested version.`);
         devDependencies[tool] = version;
     }
+    Object.assign(devDependencies, overrides);
 
     write(directory, "package.json", JSON.stringify({ private: true, type: "module", devDependencies }, null, 4));
     // 安装禁用脚本，也必须可以使用包内的编译结果。
@@ -96,9 +97,9 @@ await test("the published package works outside the workspace", { timeout: 480_0
         assert.ok(!paths.has("dist/stale-fixture.js"), "prepack must remove stale build outputs");
         const tarball = join(temporary, archive.filename);
 
-        await context.test("Node.js needs no Vite, Prettier or deployment tools", () => {
+        await context.test("Node.js supports the minimum TypeScript version without optional tools", () => {
             const directory = join(temporary, "node-consumer");
-            install(directory, tarball, ["eslint", "typescript", "@types/node", "jiti"]);
+            install(directory, tarball, ["eslint", "typescript", "@types/node", "jiti"], { typescript: "6.0.2" });
             for (const absent of ["vite", "prettier", "wrangler"]) {
                 assert.equal(existsSync(join(directory, "node_modules", absent)), false, `${absent} is optional.`);
             }
@@ -181,6 +182,64 @@ for (const [environment, source, rule] of cases) {
             run(directory, ["boundaries.ts"]);
         });
 
+        await context.test("TypeScript 7 commands coexist with the TypeScript 6 API alias", () => {
+            const directory = join(temporary, "native-typescript-consumer");
+            install(directory, tarball, ["eslint", "typescript", "@types/node", "jiti"], {
+                "@typescript/native": "npm:typescript@7.0.2",
+                typescript: "npm:@typescript/typescript6@6.0.2",
+            });
+
+            const consumer = JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as PackageManifest;
+            consumer.scripts = {
+                "type-check": "tsc --noEmit",
+                lint: "eslint . --max-warnings 0",
+            };
+            write(directory, "package.json", JSON.stringify(consumer, null, 4));
+            write(directory, "src/main.ts", "export const runtime: string = process.versions.node;\n");
+            write(
+                directory,
+                "tsconfig.json",
+                JSON.stringify({ extends: "@allurx/js-config/tsconfig/node", include: ["src", "*.ts"] })
+            );
+            write(
+                directory,
+                "eslint.config.ts",
+                `
+import { defineConfig } from "eslint/config";
+import base, { node, typeChecked } from "@allurx/js-config/eslint";
+export default defineConfig(base, {
+    files: ["src/**/*.ts", "*.ts"],
+    extends: [typeChecked, node],
+    languageOptions: { parserOptions: { tsconfigRootDir: import.meta.dirname } },
+});
+`
+            );
+
+            // 从 npm 的原生命令入口验证别名，不能靠包内路径绕过同名命令冲突。
+            assert.match(npm(directory, ["exec", "--", "tsc", "--version"]), /^Version 7\./);
+            assert.match(npm(directory, ["exec", "--", "tsc6", "--version"]), /^Version 6\.0\./);
+            npm(directory, ["run", "type-check"]);
+            npm(directory, ["run", "lint"]);
+
+            // 类型感知规则必须实际使用兼容 API，不能只验证配置可以加载。
+            write(
+                directory,
+                "check-api.ts",
+                `
+import assert from "node:assert/strict";
+import { ESLint } from "eslint";
+import ts from "typescript";
+assert.equal(ts.versionMajorMinor, "6.0");
+const linter = new ESLint();
+const [result] = await linter.lintText("Promise.resolve('unhandled');", { filePath: "src/main.ts" });
+assert.ok(result?.messages.some((message) => message.ruleId === "@typescript-eslint/no-floating-promises"));
+`
+            );
+            npm(directory, ["run", "type-check"]);
+            npm(directory, ["run", "lint"]);
+            run(directory, ["check-api.ts"]);
+        });
+
         await context.test("browser builds load the optional Prettier and Vite integrations", () => {
             const directory = join(temporary, "web-consumer");
             install(directory, tarball, ["eslint", "typescript", "@types/node", "prettier", "vite"]);
@@ -212,6 +271,59 @@ for (const [environment, source, rule] of cases) {
             run(directory, [executable(directory, "typescript", "bin/tsc"), "--project", "tsconfig.node.json"]);
             run(directory, [executable(directory, "vite", "bin/vite.js"), "build"]);
             assert.ok(readFileSync(join(directory, "dist", "index.html"), "utf8").includes("/assets/"));
+            assert.equal(existsSync(join(directory, "dist", "LICENSE.txt")), false);
+
+            // 可选插件直接交付维护源，不复制第二份许可证，也不改变内容或换行。
+            const license = "Project license\r\n版权所有：消费工程\r\n";
+            write(directory, "LICENSE.txt", license);
+            write(
+                directory,
+                "vite.config.ts",
+                `
+import { mergeConfig } from "vite";
+import base, { projectLicense } from "@allurx/js-config/vite";
+export default mergeConfig(base, { plugins: [projectLicense()] });
+`
+            );
+            run(directory, [executable(directory, "typescript", "bin/tsc"), "--project", "tsconfig.node.json"]);
+            run(directory, [executable(directory, "vite", "bin/vite.js"), "build"]);
+            assert.deepEqual(readFileSync(join(directory, "dist", "LICENSE.txt")), Buffer.from(license));
+
+            // 使用 Vite 最终 root，而非命令工作目录或 vite.config.ts 所在目录。
+            const nestedLicense = "Nested project license\n嵌套站点\n";
+            write(directory, "site/LICENSE.txt", nestedLicense);
+            write(directory, "site/index.html", "<!doctype html><title>Nested site</title>\n");
+            write(
+                directory,
+                "vite.config.ts",
+                `
+import { mergeConfig } from "vite";
+import base, { projectLicense } from "@allurx/js-config/vite";
+export default mergeConfig(base, { root: "site", plugins: [projectLicense()] });
+`
+            );
+            run(directory, [executable(directory, "vite", "bin/vite.js"), "build"]);
+            assert.deepEqual(readFileSync(join(directory, "site/dist/LICENSE.txt")), Buffer.from(nestedLicense));
+
+            rmSync(join(directory, "site/LICENSE.txt"));
+            const missingLicense = spawnSync(
+                process.execPath,
+                [executable(directory, "vite", "bin/vite.js"), "build"],
+                {
+                    cwd: directory,
+                    encoding: "utf8",
+                    timeout: 180_000,
+                }
+            );
+            assert.ifError(missingLicense.error);
+            assert.equal(missingLicense.status, 1);
+            assert.match(missingLicense.stderr, /ENOENT/);
+            assert.match(missingLicense.stderr, /allurx:project-license/);
+            assert.ok(
+                missingLicense.stderr
+                    .replaceAll("\\", "/")
+                    .includes(`${directory.replaceAll("\\", "/")}/site/LICENSE.txt`)
+            );
 
             run(directory, [
                 executable(directory, "prettier", "bin/prettier.cjs"),
