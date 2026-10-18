@@ -29,6 +29,13 @@
             "matchPackageNames": ["@allurx/**", "io.allurx:maven-parent", "allurx/allurx-build"],
             "groupName": "allurx build configuration",
             "automerge": false
+        },
+        {
+            "description": "Compare component-prefixed workflow and preset versions.",
+            "matchManagers": ["github-actions", "renovate-config"],
+            "matchPackageNames": ["allurx/allurx-build"],
+            "matchCurrentValue": "/^workflows-v/",
+            "versioning": "regex:^workflows-v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$"
         }
     ]
 }

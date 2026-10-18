@@ -23,6 +23,7 @@ const commands = [
     "npm-inspect",
     "npm-check",
     "npm-verify",
+    "npm-github-release",
 ];
 const central = "https://central.sonatype.com/api/v1/publisher";
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -223,6 +224,13 @@ async function main(): Promise<void> {
     await mkdir(directory, { recursive: true });
     if (command === "npm-inspect") return inspectNpm(directory);
     if (command === "npm-check" || command === "npm-verify") return checkNpm(directory, command === "npm-verify");
+    if (command === "npm-github-release") {
+        const manifest = await retainedNpm(directory);
+        const url = await publishGithubRelease({ directory, ...manifest, token: env("GH_TOKEN") });
+        await output("release-url", url);
+        console.log(`Verified GitHub Release: ${url}`);
+        return;
+    }
 
     const bundle = join(directory, "bundle.zip");
     if (command === "inspect") {

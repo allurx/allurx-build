@@ -284,8 +284,10 @@ await test("the native GitHub Release CLI reuses an already verified immutable R
     assert.match(result.output, /release-url=https:\/\/github.com\/allurx\/fixture\/releases\/tag\/v1.0.0/);
 });
 
-async function npmFixture(t: TestContext) {
+async function npmFixture(t: TestContext, tag = identity.tag, prefix = "v") {
     const f = await cliFixture(t);
+    const invoke: typeof f.invoke = (command, plan, extra, args) =>
+        f.invoke(command, plan, { RELEASE_TAG: tag, TAG_PREFIX: prefix, ...extra }, args);
     const bytes = Buffer.from("retained npm package bytes");
     const packed = {
         filename: "allurx-fixture-1.0.0.tgz",
@@ -295,14 +297,79 @@ async function npmFixture(t: TestContext) {
     };
     await writeFile(join(f.directory, packed.filename), bytes);
     await writeFile(join(f.directory, "pack.json"), JSON.stringify([packed]));
-    const recorded = await f.invoke("npm-inspect");
+    const recorded = await invoke("npm-inspect");
     assert.equal(recorded.status, 0, recorded.stderr);
     return {
         ...f,
+        invoke,
         packed,
         published: { name: packed.name, version: packed.version, dist: { integrity: packed.integrity } },
     };
 }
+
+await test("the npm Release CLI verifies the original tarball and recovers a component Release without Maven files or writes", async (t) => {
+    const tag = "js-config-v1.0.0";
+    const f = await npmFixture(t, tag, "js-config-v");
+    const verified = await f.invoke("npm-verify", [{ json: f.published }]);
+    assert.equal(verified.status, 0, verified.stderr);
+    const marker = `<!-- allurx-build ${JSON.stringify({
+        repository: identity.repository,
+        tag,
+        commit,
+        name: f.packed.name,
+        version: f.packed.version,
+        integrity: f.packed.integrity,
+    })} -->`;
+    const release = {
+        id: 17,
+        tag_name: tag,
+        body: `${marker}\nGenerated notes`,
+        draft: false,
+        prerelease: false,
+        immutable: true,
+        html_url: `https://github.com/allurx/fixture/releases/tag/${tag}`,
+    };
+    const assets = await Promise.all(
+        ["npm-manifest.json", "npm-verification.json"].map(async (name) => {
+            const bytes = await readFile(join(f.directory, name));
+            return {
+                name,
+                size: bytes.length,
+                digest: `sha256:${createHash("sha256").update(bytes).digest("hex")}`,
+                state: "uploaded",
+            };
+        })
+    );
+    const result = await f.invoke(
+        "npm-github-release",
+        [
+            { json: { object: { type: "tag", sha: "c".repeat(40) } } },
+            { json: { object: { type: "commit", sha: commit } } },
+            { json: [release] },
+            { json: assets },
+        ],
+        { GH_TOKEN: "fixture-token" }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(result.calls.every((call) => call.method === "GET"));
+    assert.match(result.output, /release-url=https:\/\/github.com\/allurx\/fixture\/releases\/tag\/js-config-v1.0.0/);
+});
+
+await test("the npm Release CLI rejects missing verification and changed retained bytes before GitHub requests", async (t) => {
+    const f = await npmFixture(t);
+    const missing = await f.invoke("npm-github-release", [], { GH_TOKEN: "fixture-token" });
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /npm-verification.json/);
+    assert.deepEqual(missing.calls, []);
+
+    const verified = await f.invoke("npm-verify", [{ json: f.published }]);
+    assert.equal(verified.status, 0, verified.stderr);
+    await writeFile(join(f.directory, f.packed.filename), "rebuilt package");
+    const changed = await f.invoke("npm-github-release", [], { GH_TOKEN: "fixture-token" });
+    assert.equal(changed.status, 1);
+    assert.match(changed.stderr, /Retained npm tarball does not match/);
+    assert.deepEqual(changed.calls, []);
+});
 
 await test("npm recovery skips publishing an identical existing version and verifies the retained tarball", async (t) => {
     const f = await npmFixture(t);

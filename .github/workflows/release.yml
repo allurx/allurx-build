@@ -86,7 +86,7 @@ jobs:
 
                   # 各组件从自己的 manifest 读取版本，保持独立发布。
                   case "$COMPONENT" in
-                    workflows) version="$(node -p 'require("./package.json").version')"; tag="v$version" ;;
+                    workflows) version="$(node -p 'require("./package.json").version')"; tag="workflows-v$version" ;;
                     js-config) version="$(node -p 'require("./js-config/package.json").version')"; tag="js-config-v$version" ;;
                     maven-parent) version="$(mvn -B -ntp -q -f maven-parent/pom.xml help:evaluate -Dexpression=project.version -DforceStdout -Dstyle.color=never)"; tag="maven-parent-v$version" ;;
                   esac
@@ -128,7 +128,7 @@ jobs:
         if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.component == 'js-config' }}
         uses: ./.github/workflows/npm-publish.yml
         permissions:
-            contents: read
+            contents: write
             actions: read
             id-token: write
         with:
@@ -151,5 +151,5 @@ jobs:
                   if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName > release.json; then
                     jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false' release.json
                   else
-                    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "workflows $RELEASE_TAG"
+                    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "${RELEASE_TAG/-v/ v}"
                   fi

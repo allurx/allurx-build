@@ -6,6 +6,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { assert, readJson } from "./util.ts";
 
 interface Release {
@@ -27,33 +28,53 @@ interface Asset {
     state: string;
 }
 
-interface ReleaseEvidence {
+interface ReleaseIdentity {
     directory: string;
     repository: string;
     tag: string;
     commit: string;
-    bundleSha256: string;
-    fileCount: number;
     token: string;
 }
 
+type ReleaseEvidence = ReleaseIdentity &
+    ({ bundleSha256: string; fileCount: number } | { name: string; version: string; integrity: string });
+
 /**
- * 为已通过公开核验的原始 Maven bundle 完成 GitHub Release，重试时复用已有状态。
+ * 为已通过公开核验的 Maven 或 npm 原始产物完成 GitHub Release，重试时复用已有状态。
  */
 export async function publishGithubRelease(evidence: ReleaseEvidence, fetcher = fetch): Promise<string> {
-    const { directory, repository, tag, commit, bundleSha256 } = evidence;
+    const { directory, repository, tag, commit } = evidence;
     assert(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository), "Invalid GitHub repository");
-    const verification = await readJson(join(directory, "public-verification.json"));
-    assert(
-        verification["verified"] === true &&
-            verification["bundleSha256"] === bundleSha256 &&
-            verification["files"] === evidence.fileCount,
-        "Matching public artifact verification is required before creating a Release"
-    );
+    let publication: { bundleSha256: string } | { name: string; version: string; integrity: string };
+    let attachmentNames: string[];
+    if ("bundleSha256" in evidence) {
+        const verification = await readJson(join(directory, "public-verification.json"));
+        assert(
+            verification["verified"] === true &&
+                verification["bundleSha256"] === evidence.bundleSha256 &&
+                verification["files"] === evidence.fileCount,
+            "Matching public artifact verification is required before creating a Release"
+        );
+        publication = { bundleSha256: evidence.bundleSha256 };
+        attachmentNames = ["manifest.json", "public-verification.json", "signing-public-key.asc"];
+    } else {
+        const manifest = await readJson(join(directory, "npm-manifest.json"));
+        const verification = await readJson(join(directory, "npm-verification.json"));
+        publication = { name: evidence.name, version: evidence.version, integrity: evidence.integrity };
+        assert(
+            manifest["schemaVersion"] === 1 &&
+                Object.entries({ repository, tag, commit, ...publication }).every(
+                    ([key, value]) => manifest[key] === value
+                ) &&
+                isDeepStrictEqual(verification, { ...manifest, verified: true }),
+            "Matching npm registry verification is required before creating a Release"
+        );
+        attachmentNames = ["npm-manifest.json", "npm-verification.json"];
+    }
 
-    // 只公开这些留存附件；原始 bundle 和构建日志继续保存在 workflow artifact 中。
+    // 只公开核验证据；原始 bundle、tarball 和构建日志继续保存在 workflow artifact 中。
     const attachments = await Promise.all(
-        ["manifest.json", "public-verification.json", "signing-public-key.asc"].map(async (name) => {
+        attachmentNames.map(async (name) => {
             const data = await readFile(join(directory, name));
             return {
                 name,
@@ -63,7 +84,7 @@ export async function publishGithubRelease(evidence: ReleaseEvidence, fetcher = 
             };
         })
     );
-    const marker = `<!-- allurx-build ${JSON.stringify({ repository, tag, commit, bundleSha256 })} -->`;
+    const marker = `<!-- allurx-build ${JSON.stringify({ repository, tag, commit, ...publication })} -->`;
     const root = `https://api.github.com/repos/${repository}`;
 
     async function request(path: string, method = "GET", body?: object | Uint8Array, upload = false): Promise<unknown> {

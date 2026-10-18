@@ -28,13 +28,13 @@ npm 发布使用 `npm` Environment 与 OIDC。首次创建包时，由有权且�
 
 | component      | 版本来源                                            | tag                   |
 | -------------- | --------------------------------------------------- | --------------------- |
-| `workflows`    | 根 [package.json](../package.json)                  | `vX.Y.Z`              |
+| `workflows`    | 根 [package.json](../package.json)                  | `workflows-vX.Y.Z`    |
 | `maven-parent` | [maven-parent/pom.xml](../maven-parent/pom.xml)     | `maven-parent-vX.Y.Z` |
 | `js-config`    | [js-config/package.json](../js-config/package.json) | `js-config-vX.Y.Z`    |
 
-单一产品仓库的 GitHub Release 标题使用 `vX.Y.Z`。本仓库的组件独立发版，标题使用 `workflows vX.Y.Z`、`maven-parent vX.Y.Z`，避免把不同组件误认为同一条版本线；tag 仍按上表区分组件。已发布 tag 保持不变，标题整理不改变版本、关联提交或制品。
+单一产品仓库的 GitHub Release 标题使用 `vX.Y.Z`。本仓库的组件独立发版，标题使用 `workflows vX.Y.Z`、`maven-parent vX.Y.Z`、`js-config vX.Y.Z`，避免把不同组件误认为同一条版本线；tag 按上表区分组件。工作流和 Renovate preset 的引用统一使用 `workflows-vX.Y.Z`，Actions 仍固定该 tag 指向的完整 commit SHA。
 
-工作流组件创建 GitHub Release；Maven parent 发布到 Central 并附上公开核验结果；JS Config 发布到标准 npm registry 并核对 registry 公布的 tarball integrity。消费者随后按自己的流程升级 parent/package 版本、锁文件或工作流完整 SHA，不能将本仓库发布成功表述为消费者已完成升级。
+三个组件均创建对应的 GitHub Release。Maven parent 发布到 Central，JS Config 发布到标准 npm registry；公开制品核验通过后，Release 附上原发布身份和核验记录。消费者随后按自己的流程升级 parent/package 版本、锁文件或工作流完整 SHA，不能将本仓库发布成功表述为消费者已完成升级。
 
 ## 调用方发布 Maven 制品
 
@@ -58,6 +58,8 @@ jobs:
 
 `npm-publish.yml` 面向标准 npm registry 的公开包。调用方仓库根目录提供 `.node-version`、锁文件和完整的 `npm run verify`，构建验证无需发布凭据。包的名称、版本、公开文件和 registry 元数据由其 `package.json` 维护。
 
+从 workflows 2.0.0 起，npm 发布在 registry 核验成功后创建 GitHub Release。旧调用方升级时，须把 npm 发布 job 的 `contents` 权限从 `read` 改为 `write`；普通 CI 不需要这项写权限。
+
 单包工程使用 `workspace: .`；npm workspaces 工程填写要发布的 workspace 目录。下面的 job 对应 annotated `vX.Y.Z` tag 触发，完整 SHA 的获取方式见[接入步骤](../README.md#接入工作流)：
 
 ```yaml
@@ -65,7 +67,7 @@ jobs:
     publish:
         uses: allurx/allurx-build/.github/workflows/npm-publish.yml@WORKFLOWS_COMMIT_SHA
         permissions:
-            contents: read
+            contents: write
             actions: read
             id-token: write
         with:
@@ -80,7 +82,7 @@ jobs:
 
 Maven 流程使用 `skipUpload` 构建签名 bundle，检查并保存 `bundle.zip`、manifest 和公钥后，只上传保存的原文件。上传返回的 deployment ID 进入状态记录；Central 为 `PUBLISHED` 后，再逐项核对公开文件的大小与 SHA-256，最后创建 GitHub Release 草稿，核对公开附件完整后发布。相关产物保存在 `maven-bundle-<run_id>` 与 `maven-publication-<run_id>-<attempt>` 中。
 
-npm 流程保存一次打包得到的 tarball 及身份记录，按 workspace 区分产物，发布 job 下载准确 artifact ID。记录绑定仓库、tag、commit、workspace 和原 tarball 的 SHA-512；使用者无需计算内部 artifact 名称。上传和核验使用同一 tarball；registry 中已有相同版本时，只有 integrity 与原文件一致才继续，否则失败，不覆盖已有版本。
+npm 流程保存一次打包得到的 tarball 及身份记录，按 workspace 区分产物，发布 job 下载准确 artifact ID。记录绑定仓库、tag、commit、workspace 和原 tarball 的 SHA-512；使用者无需计算内部 artifact 名称。上传和核验使用同一 tarball；registry 中已有相同版本时，只有 integrity 与原文件一致才继续，否则失败，不覆盖已有版本。随后创建 GitHub Release，附上 `npm-manifest.json` 和 `npm-verification.json`；此步骤要求调用方授予 `contents: write`。
 
 Artifacts 的保留期以工作流配置为准。应保存恢复所需的原运行 ID、tag、commit 和 deployment ID，并在 artifact 过期前处理失败。构建成功、上传响应、registry 状态或 GitHub Release 单独存在，都不能代替所需公开核验。
 
@@ -109,3 +111,5 @@ Maven 恢复使用原产物，跳过新发布所需的源码 CI、制品重建�
 首次构建或归档失败、尚未保存 tarball 时，只有 GitHub 记录能明确证明此前未进入该 workspace 的发布步骤，工作流才允许重新执行首次构建和打包。这一路径保留原 run、tag 和 commit 身份。
 
 发布已进入或结果不明，而原 tarball artifact 缺失或过期时，停止重建并核对 registry 与原日志。恢复必须使用原产物，不能重新打包冒充原发布文件，也不通过新 run 或删除已发布版本绕过检查。
+
+GitHub Release 收尾中断时，在原运行重跑对应 job。流程继续使用原 tarball、身份记录和公开核验结果，只补齐相符的缺失附件并发布草稿，保留已编辑正文；不会为了补建 Release 再次发布 npm 包。

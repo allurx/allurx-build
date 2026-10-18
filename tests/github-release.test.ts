@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -64,6 +64,42 @@ async function fixture(t: TestContext, tag = "v1.0.0") {
     );
     await writeFile(join(directory, "signing-public-key.asc"), "public signing identity fixture");
 
+    return githubFixture(evidence, 3);
+}
+
+async function npmFixture(t: TestContext) {
+    const directory = await mkdtemp(join(tmpdir(), "allurx-npm-github-release-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const bytes = Buffer.from("retained npm package bytes");
+    const evidence = {
+        directory,
+        repository: "allurx/fixture",
+        tag: "js-config-v1.0.0",
+        commit: "a".repeat(40),
+        name: "@allurx/js-config",
+        version: "1.0.0",
+        integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+        token: "fixture-token",
+    };
+    const { repository, tag, commit, name, version, integrity } = evidence;
+    const manifest = {
+        schemaVersion: 1,
+        repository,
+        tag,
+        commit,
+        workspace: "js-config",
+        filename: "allurx-js-config-1.0.0.tgz",
+        name,
+        version,
+        integrity,
+    };
+    await writeFile(join(directory, manifest.filename), bytes);
+    await writeFile(join(directory, "npm-manifest.json"), JSON.stringify(manifest));
+    await writeFile(join(directory, "npm-verification.json"), JSON.stringify({ ...manifest, verified: true }));
+    return githubFixture(evidence, 2);
+}
+
+function githubFixture<T extends Parameters<typeof publishGithubRelease>[0]>(evidence: T, attachmentCount: number) {
     const state: FixtureState = {
         release: null,
         assets: [],
@@ -140,7 +176,7 @@ async function fixture(t: TestContext, tag = "v1.0.0") {
             return Promise.resolve(Response.json(structuredClone(state.release)));
         if (method === "PATCH" && url.pathname === `${root}/releases/17`) {
             assert.deepEqual(body, { draft: false, make_latest: "legacy" });
-            assert.equal(state.assets.length, 3, "All evidence must be present before publishing");
+            assert.equal(state.assets.length, attachmentCount, "All evidence must be present before publishing");
             release().draft = false;
             release().immutable = true;
             if (state.failAfter === "publish") {
@@ -187,6 +223,68 @@ await test("a component release identifies its component without changing the ta
     const body = create.body as CreateReleaseBody;
     assert.equal(body.tag_name, "maven-parent-v1.0.0");
     assert.equal(body.name, "maven-parent v1.0.0");
+});
+
+await test("npm releases retain the package identity and attach verification without uploading the tarball", async (t) => {
+    const f = await npmFixture(t);
+    await f.finish();
+    const create = f.state.requests.find(
+        (request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/releases")
+    );
+    assert.ok(create);
+    const body = create.body as CreateReleaseBody;
+    assert.equal(body.tag_name, "js-config-v1.0.0");
+    assert.equal(body.name, "js-config v1.0.0");
+    const { repository, tag, commit, name, version, integrity } = f.evidence;
+    assert.ok(body.body.includes(JSON.stringify({ repository, tag, commit, name, version, integrity })));
+    assert.deepEqual(f.state.assets.map((asset) => asset.name).sort(), ["npm-manifest.json", "npm-verification.json"]);
+    assert.match(f.release().body, /Generated notes remain intact/);
+});
+
+await test("npm registry verification must match every retained manifest field before any GitHub request", async (t) => {
+    for (const changed of [
+        { verified: false },
+        { repository: "other/project" },
+        { tag: "js-config-v2.0.0" },
+        { commit: "d".repeat(40) },
+        { name: "@another/package" },
+        { version: "2.0.0" },
+        { integrity: "sha512-different" },
+        { filename: "another.tgz" },
+        { workspace: "another" },
+    ]) {
+        const f = await npmFixture(t);
+        const path = join(f.evidence.directory, "npm-verification.json");
+        const verification = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        await writeFile(path, JSON.stringify({ ...verification, ...changed }));
+        await assert.rejects(f.finish(), /Matching npm registry verification/);
+        assert.deepEqual(f.state.requests, []);
+    }
+});
+
+await test("npm releases recover lost creation, attachment and publication responses without repeating accepted writes", async (t) => {
+    for (const phase of ["create", "upload", "publish"] as const) {
+        const f = await npmFixture(t);
+        f.state.failAfter = phase;
+        await assert.rejects(f.finish(), /connection lost/);
+        const acceptedAssets = f.state.assets.map((asset) => asset.name);
+        f.state.requests.length = 0;
+        await f.finish();
+        assert.ok(
+            !f.state.requests.some(
+                (request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/releases")
+            )
+        );
+        const uploads = f.state.requests.filter((request) => new URL(request.url).hostname === "uploads.github.com");
+        for (const request of uploads) {
+            const name = new URL(request.url).searchParams.get("name");
+            assert.ok(name);
+            assert.ok(!acceptedAssets.includes(name));
+        }
+        assert.equal(f.state.assets.length, 2);
+        assert.equal(f.release().draft, false);
+        if (phase === "publish") assert.ok(f.state.requests.every((request) => request.method === "GET"));
+    }
 });
 
 await test("recover a draft after its creation response was lost without creating another Release", async (t) => {

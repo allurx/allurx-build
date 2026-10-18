@@ -10,6 +10,8 @@ Renovate 负责发现版本更新、创建 PR，并在项目检查通过后合�
 3. 核对目标分支的既有保护规则。采用 PR 保护的发布分支保留完整 required checks，例如 Kit 的 `verify / Maven verify` 与 `Selenium browser verification`、站点的 `site / verify`；仅生产部署时运行的 `site / deploy` 不属于 PR 必需检查。直接推送流程和开发分支保持原有规则，无需为接入 Renovate 强制 PR 或新增绕过规则。
 4. 在首次更新 PR 中核对目标分支、版本变更和完整检查，确认 Renovate 实际按共享策略运行。
 
+本仓库的工作流与 preset 使用 `workflows-vX.Y.Z` tag。workflows 2.0.0 的共享策略为 Actions 和 preset 引用提供对应的版本识别规则，更新时保留组件前缀，并继续为 Actions 固定完整 commit SHA。迁移旧引用时同时升级 preset，不能只修改 tag 注释后继续使用缺少该规则的旧策略。
+
 共享策略使用 `platformAutomerge: false`，并保留默认的 [`ignoreTests: false`](https://docs.renovatebot.com/configuration-options/#ignoretests)：Renovate 等待全部外部状态检查通过后再自行合并，不仅等待分支保护中列出的 required checks。既有分支保护继续约束合并结果；配置文件、App 授权和实际检查缺一不可。行为说明见 [Renovate 自动合并文档](https://docs.renovatebot.com/key-concepts/automerge/)。
 
 ## 常规版本更新
