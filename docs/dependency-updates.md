@@ -14,7 +14,7 @@ Renovate 负责发现版本更新、创建 PR，并在项目检查通过后合�
 
 ## 常规版本更新
 
-常规 patch、minor 和 digest 更新在完整检查通过后可自动合并；`0.x` 的 minor 更新、基础配置包、父 POM 和本仓库工作流更新保留人工审核。关联包采用 `config:recommended` 提供的分组，其余更新保留独立 PR。具体匹配、时间和并发设置以 [default.json](../default.json) 为准。
+常规 patch、minor 和 digest 更新在完整检查通过后可自动合并；major 更新、`0.x` 的 minor 更新、基础配置包、父 POM 和本仓库工作流更新保留人工审核。关联包采用 `config:recommended` 提供的分组，其余更新保留独立 PR。具体匹配、时间和并发设置以 [default.json](../default.json) 为准。
 
 npm 常规版本更新遵循 `security:minimumReleaseAgeNpm` 的发布年龄要求，达到预设观察期后再提出更新。该要求的范围与例外见 [Renovate npm 安全预设](https://docs.renovatebot.com/presets-security/#minimumreleaseagenpm)，不能把它当作对新依赖的安全审计。
 
@@ -22,9 +22,17 @@ Maven、npm、Actions 和 Node.js 的版本声明保留在工具原生文件中�
 
 ## 漏洞告警与修复
 
-GitHub [Dependabot alerts](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-alerts) 根据依赖图报告已知漏洞；Renovate 读取告警并提出修复 PR。仓库需启用依赖图和告警功能，并允许 Renovate App 读取 Dependabot alerts。常规版本更新仍由 `.github/renovate.json` 管理，这些告警设置是独立的 GitHub 功能。
+GitHub [Dependabot alerts](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-alerts) 根据依赖图报告已知漏洞；Renovate 读取告警，对已识别且有可用修复版本的依赖尝试创建安全修复 PR。仓库需启用依赖图和告警功能，并允许 Renovate App 读取 Dependabot alerts。常规版本更新仍由 `.github/renovate.json` 管理，这些告警设置是独立的 GitHub 功能。
 
-安全修复 PR 使用独立的并发额度，最多同时 5 个，不占用常规更新的 5 个名额；它们保留人工确认，完整检查通过后再合并。安全告警的处理不受常规更新时间表限制，具体行为见 [Renovate 漏洞告警配置](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)。
+读取告警不保证生成修复 PR。对于仅存在于 npm 锁文件中的间接依赖，Renovate 当前不能直接为它生成定向安全修复 PR；直接依赖的常规升级也不保证会修复其间接依赖。能力边界见 [Renovate 间接依赖说明](https://docs.renovatebot.com/key-concepts/minimum-release-age/#what-happens-to-transitive-dependencies)，其他包管理器须按各自支持范围判断。
+
+Renovate 能创建的安全修复 PR 不受常规更新时间表限制，并使用独立的并发额度，最多同时 5 个，不占用常规更新的 5 个名额；它们保留人工确认，完整检查通过后再合并。具体行为见 [Renovate 漏洞告警配置](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)。
+
+出现告警后：
+
+1. 在 GitHub 的 Dependabot alerts 中核对受影响版本、修复版本和依赖路径，结合实际构建与运行方式判断影响。
+2. 没有修复 PR 时，检查 Renovate 的依赖提取结果与扫描日志。对于 npm 间接依赖，优先升级引入它的直接依赖；现有版本范围允许修复版本时，也可由包管理器更新锁文件。
+3. 运行项目完整检查，并在实际依赖树和锁文件中核对受影响版本已移除或替换为修复版本；GitHub 更新依赖图后，再确认告警状态。PR 检查通过不能单独证明漏洞已修复。
 
 ## 合并与后续验证
 
