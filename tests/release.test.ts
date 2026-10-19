@@ -64,6 +64,8 @@ async function cliFixture(t: TestContext) {
                     GITHUB_RUN_ATTEMPT: "1",
                     DEPLOYMENT_ID: "",
                     UPLOAD_RETRY_ALLOWED: "false",
+                    GITHUB_RELEASE_ALLOW_CREATE: "",
+                    GITHUB_RELEASE_ID: "",
                     PACKAGE_DIRECTORY: ".",
                     CENTRAL_USERNAME: "fixture-user",
                     CENTRAL_PASSWORD: "fixture-password",
@@ -307,7 +309,7 @@ async function npmFixture(t: TestContext, tag = identity.tag, prefix = "v") {
     };
 }
 
-await test("the npm Release CLI verifies the original tarball and recovers a component Release without Maven files or writes", async (t) => {
+await test("the npm Release CLI recovers a known component Release even while the list is empty", async (t) => {
     const tag = "js-config-v1.0.0";
     const f = await npmFixture(t, tag, "js-config-v");
     const verified = await f.invoke("npm-verify", [{ json: f.published }]);
@@ -345,14 +347,46 @@ await test("the npm Release CLI verifies the original tarball and recovers a com
         [
             { json: { object: { type: "tag", sha: "c".repeat(40) } } },
             { json: { object: { type: "commit", sha: commit } } },
-            { json: [release] },
+            { json: release },
+            { json: [] },
             { json: assets },
         ],
-        { GH_TOKEN: "fixture-token" }
+        { GH_TOKEN: "fixture-token", GITHUB_RELEASE_ID: "17" }
     );
     assert.equal(result.status, 0, result.stderr);
     assert.ok(result.calls.every((call) => call.method === "GET"));
+    assert.ok(result.calls.some((call) => new URL(call.url).pathname.endsWith("/releases/17")));
     assert.match(result.output, /release-url=https:\/\/github.com\/allurx\/fixture\/releases\/tag\/js-config-v1.0.0/);
+});
+
+await test("the Release CLI requires explicit creation permission and validates recovery IDs before requests", async (t) => {
+    const f = await npmFixture(t);
+    const verified = await f.invoke("npm-verify", [{ json: f.published }]);
+    assert.equal(verified.status, 0, verified.stderr);
+    const emptyList = [
+        { json: { object: { type: "tag", sha: "c".repeat(40) } } },
+        { json: { object: { type: "commit", sha: commit } } },
+        { json: [] },
+    ];
+    const denied = await f.invoke("npm-github-release", emptyList, { GH_TOKEN: "fixture-token" });
+    assert.equal(denied.status, 1);
+    assert.match(denied.stderr, /Release creation is not authorized/);
+    assert.ok(denied.calls.every((call) => call.method === "GET"));
+
+    const allowed = await f.invoke("npm-github-release", [...emptyList, { error: "creation response lost" }], {
+        GH_TOKEN: "fixture-token",
+        GITHUB_RELEASE_ALLOW_CREATE: "true",
+    });
+    assert.equal(allowed.status, 1);
+    assert.match(allowed.stderr, /creation response lost/);
+    assert.equal(allowed.calls.filter((call) => call.method === "POST").length, 1);
+
+    for (const id of ["0", "wrong", "9007199254740993"]) {
+        const invalid = await f.invoke("npm-github-release", [], { GH_TOKEN: "fixture-token", GITHUB_RELEASE_ID: id });
+        assert.equal(invalid.status, 1);
+        assert.match(invalid.stderr, /positive GitHub Release ID/);
+        assert.deepEqual(invalid.calls, []);
+    }
 });
 
 await test("the npm Release CLI rejects missing verification and changed retained bytes before GitHub requests", async (t) => {

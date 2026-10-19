@@ -134,22 +134,58 @@ jobs:
         with:
             tag: ${{ needs.prepare.outputs.tag }}
     workflows:
+        name: Create workflows GitHub Release
         needs: prepare
         if: ${{ !cancelled() && needs.prepare.result == 'success' && inputs.component == 'workflows' }}
         runs-on: ubuntu-24.04
         permissions:
             contents: write
+            actions: read
+        env:
+            GH_TOKEN: ${{ github.token }}
+            RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+            RELEASE_JOB: Create workflows GitHub Release
         steps:
-            - env:
-                  GH_TOKEN: ${{ github.token }}
-                  RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  path: project
+                  fetch-depth: 0
+                  persist-credentials: false
+            - name: Check whether this run may create a Release
+              run: |
+                  set -euo pipefail
+                  if bash project/scripts/assert-upload-not-started.sh \
+                    "$RELEASE_JOB" 'Publish workflow release notes' project; then
+                    echo 'GITHUB_RELEASE_ALLOW_CREATE=true' >> "$GITHUB_ENV"
+                  else
+                    echo 'GITHUB_RELEASE_ALLOW_CREATE=false' >> "$GITHUB_ENV"
+                    echo '::warning::A previous Release creation cannot be ruled out; only an existing Release may be recovered.'
+                  fi
+            - name: Publish workflow release notes
               run: |
                   set -euo pipefail
                   object="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$RELEASE_TAG" --jq '.object | select(.type == "tag") | .sha')"
                   test -n "$object"
                   test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$object" --jq '.object.sha')" = "$GITHUB_SHA"
-                  if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName > release.json; then
-                    jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false' release.json
-                  else
-                    gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "${RELEASE_TAG/-v/ v}"
+
+                  # 查询失败不能视为不存在；重跑也不能凭暂空的列表再次创建。
+                  gh api "repos/$GITHUB_REPOSITORY/releases" --paginate |
+                    jq -s --arg tag "$RELEASE_TAG" '
+                      [.[][] | select(.tag_name == $tag)]
+                      | if length > 1 then error("Multiple Releases use this tag") else .[0] end
+                    ' > release.json
+                  if jq -e '. == null' release.json >/dev/null; then
+                    if [[ "$GITHUB_RELEASE_ALLOW_CREATE" != true ]]; then
+                      echo '::error::Release creation is not authorized; inspect the previous attempt and recover the existing Release.'
+                      exit 1
+                    fi
+                    gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+                      -f tag_name="$RELEASE_TAG" -f target_commitish="$GITHUB_SHA" \
+                      -f name="${RELEASE_TAG/-v/ v}" \
+                      -F draft=false -F prerelease=false -F generate_release_notes=true > release.json
                   fi
+                  id="$(jq -er '.id | select(type == "number" and . > 0 and floor == .)' release.json)"
+                  printf 'GitHub Release ID: %s\n' "$id"
+                  gh api "repos/$GITHUB_REPOSITORY/releases/$id" > release.json
+                  jq -e --arg tag "$RELEASE_TAG" --argjson id "$id" \
+                    '.id == $id and .tag_name == $tag and .draft == false and .prerelease == false' release.json

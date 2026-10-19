@@ -310,6 +310,7 @@ jobs:
         env:
             RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
             RELEASE_DIR: ${{ github.workspace }}/release-data
+            RELEASE_JOB: Create GitHub Release
         steps:
             - name: Check out the verified release tag
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -341,6 +342,33 @@ jobs:
                   artifact-ids: ${{ needs.publish.outputs.artifact-id }}
                   path: release-data
                   merge-multiple: true
+            - name: Check whether this run may create a Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  SOURCE_RUN: ${{ inputs.recovery-run-id }}
+              run: |
+                  set -euo pipefail
+                  allow_create=true
+                  if ! bash .allurx-build/scripts/assert-upload-not-started.sh \
+                    "$RELEASE_JOB" 'Publish release notes and verification' project; then
+                    allow_create=false
+                  fi
+                  # 跨 run 恢复还须排除原 run 的最后一次尝试已创建 Release。
+                  if [[ -n "$SOURCE_RUN" ]]; then
+                    if source_attempt="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .run_attempt)" \
+                      && [[ "$source_attempt" =~ ^[1-9][0-9]*$ ]] \
+                      && GITHUB_RUN_ID="$SOURCE_RUN" GITHUB_RUN_ATTEMPT="$((source_attempt + 1))" \
+                        bash .allurx-build/scripts/assert-upload-not-started.sh \
+                          "$RELEASE_JOB" 'Publish release notes and verification' project; then
+                      :
+                    else
+                      allow_create=false
+                    fi
+                  fi
+                  echo "GITHUB_RELEASE_ALLOW_CREATE=$allow_create" >> "$GITHUB_ENV"
+                  if [[ "$allow_create" != true ]]; then
+                    echo '::warning::A previous Release creation cannot be ruled out; only an existing Release may be recovered.'
+                  fi
             - name: Publish release notes and verification
               id: release
               env:

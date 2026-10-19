@@ -220,7 +220,7 @@ jobs:
 
     # 收尾只复用原 tarball 和公开核验结果；恢复失败 job 不重新打包或发布 npm。
     release:
-        name: Create GitHub Release
+        name: Create npm GitHub Release (${{ inputs.workspace }})
         needs: publish
         if: ${{ !cancelled() && needs.publish.result == 'success' }}
         runs-on: ubuntu-24.04
@@ -236,7 +236,15 @@ jobs:
             PACKAGE_DIRECTORY: ${{ inputs.workspace }}
             EXPECTED_COMMIT: ${{ needs.publish.outputs.commit }}
             RELEASE_DIR: ${{ github.workspace }}/release-data
+            RELEASE_JOB: Create npm GitHub Release (${{ inputs.workspace }})
         steps:
+            - name: Check out the verified release tag
+              uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  ref: refs/tags/${{ inputs.tag }}
+                  fetch-depth: 0
+                  path: project
+                  persist-credentials: false
             - name: Check out matching release helpers
               uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
@@ -257,6 +265,18 @@ jobs:
                   artifact-ids: ${{ needs.publish.outputs.package-artifact-id }},${{ needs.publish.outputs.artifact-id }}
                   path: release-data
                   merge-multiple: true
+            - name: Check whether this run may create a Release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  if bash .allurx-build/scripts/assert-upload-not-started.sh \
+                    "$RELEASE_JOB" 'Publish release notes and verification' project; then
+                    echo 'GITHUB_RELEASE_ALLOW_CREATE=true' >> "$GITHUB_ENV"
+                  else
+                    echo 'GITHUB_RELEASE_ALLOW_CREATE=false' >> "$GITHUB_ENV"
+                    echo '::warning::A previous Release creation cannot be ruled out; only an existing Release may be recovered.'
+                  fi
             - name: Publish release notes and verification
               id: release
               env:

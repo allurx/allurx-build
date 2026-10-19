@@ -113,3 +113,19 @@ Maven 恢复使用原产物，跳过新发布所需的源码 CI、制品重建�
 发布已进入或结果不明，而原 tarball artifact 缺失或过期时，停止重建并核对 registry 与原日志。恢复必须使用原产物，不能重新打包冒充原发布文件，也不通过新 run 或删除已发布版本绕过检查。
 
 GitHub Release 收尾中断时，在原运行重跑对应 job。流程继续使用原 tarball、身份记录和公开核验结果，只补齐相符的缺失附件并发布草稿，保留已编辑正文；不会为了补建 Release 再次发布 npm 包。
+
+## GitHub Release 恢复
+
+Maven 和 npm 的 Release 收尾会先查询已有 Release。只有运行记录能明确排除此前进入创建步骤，才允许首次创建；查询失败或暂时查不到新草稿，都不能证明创建未发生。已经进入创建步骤的重跑只恢复已有对象，不另建 Release。
+
+日志中的 `GitHub Release ID` 标识实际使用的对象。列表暂时未返回该对象时，可等待后重跑原 job；需要按已知 ID 恢复时，下载原运行的完整发布产物，使用对应版本的发布工具执行：
+
+```sh
+# 先设置原产物目录 RELEASE_DIR，以及原 GITHUB_REPOSITORY、RELEASE_TAG 和 EXPECTED_COMMIT。
+# npm 还需按原 manifest 设置 PACKAGE_DIRECTORY，并按原调用方配置设置 TAG_PREFIX。
+# GH_TOKEN 使用现有安全认证方式提供，不写入命令或文件。
+GITHUB_RELEASE_ID=RELEASE_ID node src/release.ts npm-github-release
+# Maven 产物使用 github-release 命令。
+```
+
+将 `RELEASE_ID` 替换为日志或 GitHub API 确认的正整数 ID。仓库、tag、commit 和 npm workspace 从原 manifest 读取；`TAG_PREFIX` 与原发布调用一致，例如本仓库 JS Config 使用 `js-config-v`。npm 恢复需原 tarball、manifest 和 registry 核验记录；Maven 恢复需原 bundle、manifest、公钥和公开核验记录。命令重新核对这些原始产物及 tag 身份。指定的 ID 不存在、身份不符或附件冲突时会失败，不会回退到另建对象。创建请求超时且未取得 ID 时，先核对 GitHub 的实际状态，不能手动开启 `GITHUB_RELEASE_ALLOW_CREATE` 来试探是否已创建。

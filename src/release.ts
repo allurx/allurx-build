@@ -64,6 +64,16 @@ function expectedIdentity(): ReleaseIdentity {
     return { repository: env("GITHUB_REPOSITORY"), tag: env("RELEASE_TAG"), commit };
 }
 
+function githubReleaseOptions() {
+    const id = env("GITHUB_RELEASE_ID", "");
+    assert(!id || /^[1-9][0-9]*$/.test(id), "Expected a positive GitHub Release ID");
+    return {
+        token: env("GH_TOKEN"),
+        allowCreate: env("GITHUB_RELEASE_ALLOW_CREATE", "false") === "true",
+        ...(id ? { releaseId: Number(id) } : {}),
+    };
+}
+
 function checkIdentity(manifest: Record<string, unknown>): ReleaseIdentity {
     const expected = expectedIdentity();
     assert(
@@ -226,7 +236,7 @@ async function main(): Promise<void> {
     if (command === "npm-check" || command === "npm-verify") return checkNpm(directory, command === "npm-verify");
     if (command === "npm-github-release") {
         const manifest = await retainedNpm(directory);
-        const url = await publishGithubRelease({ directory, ...manifest, token: env("GH_TOKEN") });
+        const url = await publishGithubRelease({ directory, ...manifest, ...githubReleaseOptions() });
         await output("release-url", url);
         console.log(`Verified GitHub Release: ${url}`);
         return;
@@ -253,7 +263,7 @@ async function main(): Promise<void> {
             ...expectedIdentity(),
             bundleSha256: manifest.bundleSha256,
             fileCount: manifest.files.length,
-            token: env("GH_TOKEN"),
+            ...githubReleaseOptions(),
         });
         await output("release-url", url);
         console.log(`Verified GitHub Release: ${url}`);

@@ -34,6 +34,8 @@ interface ReleaseIdentity {
     tag: string;
     commit: string;
     token: string;
+    releaseId?: number;
+    allowCreate?: boolean;
 }
 
 type ReleaseEvidence = ReleaseIdentity &
@@ -45,6 +47,10 @@ type ReleaseEvidence = ReleaseIdentity &
 export async function publishGithubRelease(evidence: ReleaseEvidence, fetcher = fetch): Promise<string> {
     const { directory, repository, tag, commit } = evidence;
     assert(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository), "Invalid GitHub repository");
+    assert(
+        evidence.releaseId === undefined || (Number.isSafeInteger(evidence.releaseId) && evidence.releaseId > 0),
+        "Expected a positive GitHub Release ID"
+    );
     let publication: { bundleSha256: string } | { name: string; version: string; integrity: string };
     let attachmentNames: string[];
     if ("bundleSha256" in evidence) {
@@ -163,20 +169,38 @@ export async function publishGithubRelease(evidence: ReleaseEvidence, fetcher = 
     }
 
     await checkRemoteTag();
-    // 按 tag 查询只能保证找到已发布版本；列表还能找回中断后留下的草稿。
+    // 新建草稿可能尚未出现在列表中；已知 ID 直接读取，不能因 404 或身份不符另建一份。
+    let release: Release | undefined;
+    if (evidence.releaseId !== undefined) {
+        release = (await request(`/releases/${evidence.releaseId}`)) as Release;
+        checkRelease(release);
+        assert(release.id === evidence.releaseId, "GitHub returned a different Release ID");
+    }
     const matches = (await pages<Release>("/releases")).filter((release) => release.tag_name === tag);
-    assert(matches.length <= 1, "Multiple Releases use this tag; inspect them without overwriting either");
-    let release = matches[0];
-    release ??= (await request("/releases", "POST", {
-        tag_name: tag,
-        target_commitish: commit,
-        name: tag.replace(/-v(?=\d+\.\d+\.\d+$)/, " v"),
-        body: `${marker}\n\n`,
-        generate_release_notes: true,
-        draft: true,
-        prerelease: false,
-    })) as Release;
+    assert(
+        matches.length <= 1 && matches.every((match) => !release || match.id === release.id),
+        "Multiple Releases use this tag; inspect them without overwriting either"
+    );
+    release ??= matches[0];
+    if (!release) {
+        // 列表暂空不能证明之前没有创建成功；只有发布控制器明确授权首次创建时才发送 POST。
+        assert(
+            evidence.allowCreate === true,
+            "Release creation is not authorized; retry recovery after checking GitHub or supply GITHUB_RELEASE_ID"
+        );
+        release = (await request("/releases", "POST", {
+            tag_name: tag,
+            target_commitish: commit,
+            name: tag.replace(/-v(?=\d+\.\d+\.\d+$)/, " v"),
+            body: `${marker}\n\n`,
+            generate_release_notes: true,
+            draft: true,
+            prerelease: false,
+        })) as Release;
+    }
     checkRelease(release);
+    // 后续上传失败时，日志中的准确 ID 可直接用于恢复，不依赖列表即时可见。
+    console.log(`GitHub Release ID: ${release.id}`);
 
     // 先检查全部已有附件，避免发现冲突前已写入其他附件。
     const missing = missingAttachments(await pages<Asset>(`/releases/${release.id}/assets`));

@@ -24,6 +24,8 @@ interface FixtureRelease {
 
 interface FixtureState {
     release: FixtureRelease | null;
+    listed: boolean;
+    otherReleases: FixtureRelease[];
     assets: { name: string; size: number; digest: string; state: string }[];
     remoteCommit: string;
     requests: { url: string; method: string; body: unknown }[];
@@ -102,6 +104,8 @@ async function npmFixture(t: TestContext) {
 function githubFixture<T extends Parameters<typeof publishGithubRelease>[0]>(evidence: T, attachmentCount: number) {
     const state: FixtureState = {
         release: null,
+        listed: true,
+        otherReleases: [],
         assets: [],
         remoteCommit: evidence.commit,
         requests: [],
@@ -128,7 +132,12 @@ function githubFixture<T extends Parameters<typeof publishGithubRelease>[0]>(evi
             return Promise.resolve(Response.json({ object: { type: "commit", sha: state.remoteCommit } }));
         }
         if (method === "GET" && url.pathname === `${root}/releases`) {
-            return Promise.resolve(Response.json(state.release ? [structuredClone(state.release)] : []));
+            return Promise.resolve(
+                Response.json([
+                    ...(state.listed && state.release ? [structuredClone(state.release)] : []),
+                    ...structuredClone(state.otherReleases),
+                ])
+            );
         }
         if (method === "POST" && url.pathname === `${root}/releases`) {
             assert.equal(state.release, null, "Never create a second Release for an interrupted draft");
@@ -172,8 +181,12 @@ function githubFixture<T extends Parameters<typeof publishGithubRelease>[0]>(evi
             }
             return Promise.resolve(Response.json(structuredClone(asset), { status: 201 }));
         }
-        if (method === "GET" && url.pathname === `${root}/releases/17`)
-            return Promise.resolve(Response.json(structuredClone(state.release)));
+        if (method === "GET" && url.pathname.startsWith(`${root}/releases/`))
+            return Promise.resolve(
+                url.pathname === `${root}/releases/17` && state.release
+                    ? Response.json(structuredClone(state.release))
+                    : Response.json({ message: "Not Found" }, { status: 404 })
+            );
         if (method === "PATCH" && url.pathname === `${root}/releases/17`) {
             assert.deepEqual(body, { draft: false, make_latest: "legacy" });
             assert.equal(state.assets.length, attachmentCount, "All evidence must be present before publishing");
@@ -187,7 +200,16 @@ function githubFixture<T extends Parameters<typeof publishGithubRelease>[0]>(evi
         }
         throw new Error(`Unexpected fake GitHub request: ${method} ${url.href}`);
     };
-    return { evidence, state, release, finish: () => publishGithubRelease(evidence, fetcher) };
+    return {
+        evidence,
+        state,
+        release,
+        finish: (
+            options: Pick<Parameters<typeof publishGithubRelease>[0], "allowCreate" | "releaseId"> = {
+                allowCreate: true,
+            }
+        ) => publishGithubRelease({ ...evidence, ...options }, fetcher),
+    };
 }
 
 await test("create a draft with generated notes, attach verified evidence, then publish it", async (t) => {
@@ -269,7 +291,7 @@ await test("npm releases recover lost creation, attachment and publication respo
         await assert.rejects(f.finish(), /connection lost/);
         const acceptedAssets = f.state.assets.map((asset) => asset.name);
         f.state.requests.length = 0;
-        await f.finish();
+        await f.finish({});
         assert.ok(
             !f.state.requests.some(
                 (request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/releases")
@@ -292,13 +314,55 @@ await test("recover a draft after its creation response was lost without creatin
     f.state.failAfter = "create";
     await assert.rejects(f.finish(), /connection lost/);
     assert.equal(f.release().draft, true);
-    await f.finish();
+    await f.finish({});
     assert.equal(
         f.state.requests.filter(
             (request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/releases")
         ).length,
         1
     );
+});
+
+await test("a lost creation response and a stale empty list never authorize another creation during recovery", async (t) => {
+    for (const makeFixture of [fixture, npmFixture]) {
+        const f = await makeFixture(t);
+        await assert.rejects(f.finish({}), /Release creation is not authorized/);
+        assert.ok(f.state.requests.every((request) => request.method === "GET"));
+        f.state.failAfter = "create";
+        await assert.rejects(f.finish(), /connection lost/);
+        f.state.listed = false;
+        f.state.requests.length = 0;
+        await assert.rejects(f.finish({}), /Release creation is not authorized/);
+        assert.ok(f.state.requests.every((request) => request.method === "GET"));
+
+        // 直接 ID 读取已经可见，不依赖列表追上最新状态，也不重新创建草稿。
+        await f.finish({ releaseId: 17 });
+        assert.ok(
+            !f.state.requests.some(
+                (request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/releases")
+            )
+        );
+        assert.equal(f.release().draft, false);
+    }
+});
+
+await test("a known Release ID never falls back to creation or hides a conflicting Release", async (t) => {
+    for (const scenario of ["missing", "wrong tag", "wrong marker", "different ID", "duplicate"] as const) {
+        const f = await npmFixture(t);
+        f.state.failAfter = "create";
+        await assert.rejects(f.finish(), /connection lost/);
+        f.state.listed = false;
+        if (scenario === "wrong tag") f.release().tag_name = "other-v1.0.0";
+        if (scenario === "wrong marker") f.release().body = "Another publication";
+        if (scenario === "different ID") f.release().id = 18;
+        if (scenario === "duplicate") f.state.otherReleases.push({ ...f.release(), id: 18 });
+        f.state.requests.length = 0;
+        await assert.rejects(
+            f.finish({ releaseId: scenario === "missing" ? 18 : 17, allowCreate: true }),
+            /HTTP 404|identity differs|different Release ID|Multiple Releases/
+        );
+        assert.ok(f.state.requests.every((request) => request.method === "GET"));
+    }
 });
 
 await test("resume after a lost upload response without replacing the accepted attachment", async (t) => {
