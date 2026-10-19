@@ -14,7 +14,7 @@ SPDX-License-Identifier: Apache-2.0
 1. 在 [package.json](package.json) 填写工程名称，在 [wrangler.jsonc](wrangler.jsonc) 填写 Worker 名称，在 [index.html](index.html) 修改标题和页面内容，并替换 [favicon](public/favicon.svg) 与 [404 页面](public/404.html)中的站点名称和视觉标识。
 2. 把 [CI](.github/workflows/ci.yml) 的 `production-url` 换成网站地址。它只决定部署记录中的链接；Worker 实际使用哪个域名，要在 Wrangler 配置中设置。
 
-CI 已固定正式工作流 `v1.0.0` 的完整 commit SHA，无需额外选择版本。保留 `secrets: inherit`；选择其他发行时，按[工作流接入步骤](https://github.com/allurx/allurx-build/blob/main/README.md#接入工作流)更新 SHA 与版本注释。配置包和开发工具使用 npm 精确版本，独立于工作流版本更新。
+CI 已固定正式工作流 `workflows-v2.0.0` 的完整 commit SHA，无需额外选择版本。保留 `secrets: inherit`；选择其他发行时，按[工作流接入步骤](https://github.com/allurx/allurx-build/blob/main/README.md#接入工作流)更新 SHA 与版本注释。配置包和开发工具使用 npm 精确版本，独立于工作流版本更新。
 
 然后安装依赖、启动开发服务器：
 

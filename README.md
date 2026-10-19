@@ -25,7 +25,7 @@ Each project retains its business dependencies, modules, source scope, product b
 
 The shared workflows target GitHub.com. Maven and npm publishing use GitHub.com's [workflow identity context](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context) to pin the source of their helper tools. GitHub Enterprise Server is not supported.
 
-The complete [Maven CI example](examples/ci.yml), [Maven release example](examples/release.yml), and [static site template](templates/static-site/README.md) are pinned to the full commit SHA of the published [workflows v1.0.0](https://github.com/allurx/allurx-build/releases/tag/workflows-v1.0.0) release. Copy an example and configure the project's branches, release conditions, and deployment targets; there is no need to look up that SHA again.
+The complete [Maven CI example](examples/ci.yml), [Maven release example](examples/release.yml), and [static site template](templates/static-site/README.md) are pinned to the full commit SHA of the published [workflows v2.0.0](https://github.com/allurx/allurx-build/releases/tag/workflows-v2.0.0) release. Copy an example and configure the project's branches, release conditions, and deployment targets; there is no need to look up that SHA again.
 
 Short documentation snippets use `WORKFLOWS_COMMIT_SHA` as a placeholder for the workflow version. To write a caller yourself or select another release:
 

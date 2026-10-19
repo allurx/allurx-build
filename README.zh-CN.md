@@ -21,7 +21,7 @@ Allurx 项目的共享构建配置、GitHub Actions、依赖更新策略和起�
 
 共享工作流以 GitHub.com 为运行目标。Maven 和 npm 入口使用 GitHub.com 的 [workflow identity 上下文](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context)固定辅助工具来源，GitHub Enterprise Server 不在支持范围。
 
-完整的 [Maven CI 示例](examples/ci.yml)、[Maven 发布示例](examples/release.yml)和[静态站点模板](templates/static-site/README.md)已固定到正式 [workflows v1.0.0](https://github.com/allurx/allurx-build/releases/tag/workflows-v1.0.0) 的完整 commit SHA。复制时无需重新查找 SHA，按项目配置分支、发布条件和部署目标即可。
+完整的 [Maven CI 示例](examples/ci.yml)、[Maven 发布示例](examples/release.yml)和[静态站点模板](templates/static-site/README.md)已固定到正式 [workflows v2.0.0](https://github.com/allurx/allurx-build/releases/tag/workflows-v2.0.0) 的完整 commit SHA。复制时无需重新查找 SHA，按项目配置分支、发布条件和部署目标即可。
 
 文档中的简短片段使用 `WORKFLOWS_COMMIT_SHA` 表示工作流版本。自行编写调用方或选择其他发行时：
 
