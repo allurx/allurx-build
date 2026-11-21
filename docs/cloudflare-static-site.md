@@ -7,7 +7,7 @@
 新工程可从[静态站点模板](../templates/static-site/README.md)开始；已有工程按以下契约接入，保留自己的源码目录、workspace、构建插件、测试及交付方式，不需要用模板覆盖现有工程。
 
 - `.node-version` 指定 Node.js，提交 `package-lock.json`，让 `npm ci` 可重复安装。
-- `npm run verify` 完成项目验收和生产构建，生成唯一明确的公开资产目录。
+- `npm run verify` 完成项目验收和生产构建，生成可部署的公开资产目录，以及调用方配置的额外交付目录。
 - `npm run deploy` 执行 `wrangler deploy`，只部署已有产物，不重新构建。
 - `wrangler.jsonc` 维护 Worker 名称、资源配置和域名；Wrangler 作为项目开发依赖固定版本。
 
@@ -38,11 +38,15 @@ jobs:
 
 `asset-directory` 必须是仓库内一个实际存在的子目录，不接受仓库根目录、通配符、多个路径或目录符号链接。目录只应包含可公开分发的文件，上传时包括 `.well-known` 等隐藏文件。
 
+从 `workflows-v2.1.0` 起，如果同一轮验证还生成独立下载文件，可在 `with` 中设置 `additional-artifact-directory`，例如 `dist/portable/`。它遵循与 `asset-directory` 相同的目录检查和隐藏文件上传规则。将额外文件放在部署目录之外，可单独分发。
+
 `production-url` 只决定 GitHub 部署记录的链接，不配置域名。生产分支和 Environment 默认都是 `main`、`production`，可用 `production-branch`、`environment` 显式调整；同时同步调用方事件及 Environment 保护。
 
 ## 验证与部署
 
 PR 和非生产分支只执行 `npm ci`、`npm run verify` 和 Wrangler dry-run。只有生产分支的 push 或 `workflow_dispatch` 会上传并部署验证过的同一份产物；部署 job 下载准确 artifact ID，不重新构建。若等待审批期间生产分支已经前进，旧提交会跳过部署。
+
+生产分支上传的 Web artifact 名称为 `web-<run_id>-<run_attempt>`。设置额外目录时，同一验证 job 还会上传 `additional-<run_id>-<run_attempt>`。两者均保留 7 天。需要分发的工作流可按提交定位成功的生产分支运行，取得同一验证尝试生成的两个 artifact。
 
 在 GitHub Actions 核对 `site / verify`，再确认 `site / deploy` 实际成功且未被跳过。到 Cloudflare 核对版本中的 commit SHA 和 Actions 链接，最后检查公开页面、路由、响应头及关键交互。通过 dry-run 不能证明远端权限正确或目标提交已上线。
 

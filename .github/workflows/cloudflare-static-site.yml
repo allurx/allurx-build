@@ -12,6 +12,9 @@ on:
                 description: 已经验证的部署资产目录，相对于调用方仓库根目录
                 required: true
                 type: string
+            additional-artifact-directory:
+                description: 同次验证生成的额外交付目录，相对于调用方仓库根目录
+                type: string
             production-url:
                 # GitHub 部署记录中的站点链接；实际域名仍需在 Wrangler 中配置。
                 description: 记录在生产部署中的公开站点地址
@@ -56,35 +59,43 @@ jobs:
             - name: Verify project
               run: npm run verify
 
-            - name: Validate asset directory
+            - name: Validate artifact directories
               id: assets
               env:
                   ASSET_DIRECTORY: ${{ inputs.asset-directory }}
+                  ADDITIONAL_ARTIFACT_DIRECTORY: ${{ inputs.additional-artifact-directory }}
               run: |
                   node --input-type=module <<'NODE'
                   import { appendFileSync, realpathSync, statSync } from "node:fs";
                   import { isAbsolute, relative, resolve, sep } from "node:path";
 
-                  // 上传工具支持通配符和多行路径，这里只接受一个明确的目录。
-                  const input = process.env.ASSET_DIRECTORY;
-                  if (!input || input !== input.trim() || isAbsolute(input) || /[\r\n\\*?\[\]{}!]/.test(input)) {
-                      throw new Error("asset-directory must be one relative directory, without glob patterns.");
-                  }
-
-                  // 只允许仓库内的子目录，不能上传整个仓库或仓库外的文件。
                   const workspace = realpathSync(process.env.GITHUB_WORKSPACE);
-                  const directory = resolve(workspace, input);
-                  const path = relative(workspace, directory);
-                  if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
-                      throw new Error("asset-directory must be a directory inside the repository, not its root.");
-                  }
-                  // 目录必须已存在，目录及其父路径都不能是符号链接。
-                  if (realpathSync(directory) !== directory || !statSync(directory).isDirectory()) {
-                      throw new Error("asset-directory must contain only directories, without symbolic links.");
+
+                  /**
+                   * 校验单个构建目录，使上传范围限定在调用方仓库内。
+                   */
+                  function artifactDirectory(input, name) {
+                      if (!input || input !== input.trim() || isAbsolute(input) || /[\r\n\\*?\[\]{}!]/.test(input)) {
+                          throw new Error(`${name} must be one relative directory, without glob patterns.`);
+                      }
+
+                      const directory = resolve(workspace, input);
+                      const path = relative(workspace, directory);
+                      if (!path || path === ".." || path.startsWith(`..${sep}`) || isAbsolute(path)) {
+                          throw new Error(`${name} must be a directory inside the repository, not its root.`);
+                      }
+                      if (realpathSync(directory) !== directory || !statSync(directory).isDirectory()) {
+                          throw new Error(`${name} must contain only directories, without symbolic links.`);
+                      }
+                      return directory;
                   }
 
-                  // 后续检查和上传都使用这个绝对路径。
-                  appendFileSync(process.env.GITHUB_OUTPUT, `directory=${directory}\n`);
+                  const web = artifactDirectory(process.env.ASSET_DIRECTORY, "asset-directory");
+                  appendFileSync(process.env.GITHUB_OUTPUT, `directory=${web}\n`);
+                  if (process.env.ADDITIONAL_ARTIFACT_DIRECTORY) {
+                      const additional = artifactDirectory(process.env.ADDITIONAL_ARTIFACT_DIRECTORY, "additional-artifact-directory");
+                      appendFileSync(process.env.GITHUB_OUTPUT, `additional=${additional}\n`);
+                  }
                   NODE
 
             - name: Validate Cloudflare configuration
@@ -101,6 +112,16 @@ jobs:
                   name: web-${{ github.run_id }}-${{ github.run_attempt }}
                   path: ${{ steps.assets.outputs.directory }}
                   # .well-known 等以点开头的文件也会上传，目录里应只放公开内容。
+                  include-hidden-files: true
+                  if-no-files-found: error
+                  retention-days: 7
+
+            - name: Upload additional verified assets
+              if: steps.web_artifact.outcome == 'success' && inputs.additional-artifact-directory != ''
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: additional-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: ${{ steps.assets.outputs.additional }}
                   include-hidden-files: true
                   if-no-files-found: error
                   retention-days: 7
