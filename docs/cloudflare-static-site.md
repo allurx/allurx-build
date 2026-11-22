@@ -58,6 +58,21 @@ npm run deploy -- --dry-run
 
 `npm run deploy` 会实际发布，执行前须有部署授权。保留一个明确的自动部署入口，避免同时启用 Workers Builds 的 Git 触发器和 Actions 部署。依赖自动合并后的行为见[依赖更新指南](dependency-updates.md)。
 
+## 复用已验证的构建产物
+
+从 `workflows-v2.2.0` 起，发布 job 可调用 [download-verified-site-assets](../actions/download-verified-site-assets/action.yml)，下载本仓库指定提交在成功的生产分支推送 CI 中生成的文件。job 需授予 `actions: read`，使用提供 Bash、GitHub CLI 和 jq 的 runner。将下例中的 `WORKFLOWS_COMMIT_SHA` 替换为正式发行的完整 SHA。示例中的 `release_commit` 步骤由调用方提供，其 `sha` 输出应为已核对的提交 SHA。
+
+```yaml
+- uses: allurx/allurx-build/actions/download-verified-site-assets@WORKFLOWS_COMMIT_SHA
+  with:
+      workflow: ci.yml
+      commit-sha: ${{ steps.release_commit.outputs.sha }}
+      web-directory: dist/web
+      additional-directory: dist/portable
+```
+
+`production-branch` 默认是 `main`。每个目标目录应为空，只需要 Web 时省略 `additional-directory`。下载使用同一验证尝试中的产物，兼容仅重跑部署的情况。任一所需产物过期或缺失时，下载失败。需要恢复时，在 GitHub 允许重跑的期限内手动重跑该提交的原生产推送 CI 的全部任务，成功后再重试下载。
+
 ## 下载文件与响应变换
 
 Cloudflare 的自动统计或其他响应变换可能向 HTML 注入脚本。对于必须保持字节不变的自包含 HTML 下载，在对应的 [`_headers` 规则](https://developers.cloudflare.com/workers/static-assets/headers/)中设置 `Content-Disposition: attachment`，并在原有 `Cache-Control` 中加入 `no-transform`。例如，保留静态资源默认缓存语义时使用 `public, max-age=0, must-revalidate, no-transform`；不要将下载限制扩展到普通页面。Cloudflare 对自动统计注入的处理见[官方说明](https://developers.cloudflare.com/web-analytics/faq/#my-website-is-proxied-through-cloudflare-but-web-analytics-automatic-setup-is-not-working)。

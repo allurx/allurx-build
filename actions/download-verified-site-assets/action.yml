@@ -1,0 +1,89 @@
+# Copyright 2026 allurx
+# SPDX-License-Identifier: Apache-2.0
+
+name: Download verified site assets
+description: 下载指定提交在生产分支推送 CI 中通过验证的站点产物
+inputs:
+    workflow:
+        description: 调用共享站点工作流的 CI 文件名
+        required: true
+    production-branch:
+        description: 触发生产 CI 的分支名称
+        default: main
+    commit-sha:
+        description: 已验证提交的完整 SHA
+        required: true
+    web-directory:
+        description: 接收 Web 产物的目录
+        required: true
+    additional-directory:
+        description: 接收同次验证生成的额外产物的目录
+runs:
+    using: composite
+    steps:
+        - name: Locate verified site assets
+          id: assets
+          shell: bash
+          env:
+              GH_TOKEN: ${{ github.token }}
+              WORKFLOW: ${{ inputs.workflow }}
+              BRANCH: ${{ inputs.production-branch }}
+              COMMIT: ${{ inputs.commit-sha }}
+              WEB_DIRECTORY: ${{ inputs.web-directory }}
+              ADDITIONAL_DIRECTORY: ${{ inputs.additional-directory }}
+          run: |
+              set -euo pipefail
+
+              if [[ ! "$COMMIT" =~ ^[[:xdigit:]]{40}$ || -z "$BRANCH" || -z "$WEB_DIRECTORY" ]]; then
+                  echo "::error::Supply a full commit SHA, a production branch, and a Web destination directory."
+                  exit 1
+              fi
+              if [[ "$WORKFLOW" == */* || ! "$WORKFLOW" =~ \.ya?ml$ ]]; then
+                  echo "::error::Supply the CI workflow file name."
+                  exit 1
+              fi
+
+              api="repos/$GITHUB_REPOSITORY/actions"
+              workflow_id="$(jq -nr --arg name "$WORKFLOW" '$name | @uri')"
+              run_id="$(gh api -X GET "$api/workflows/$workflow_id/runs" \
+                  -f event=push -f "branch=$BRANCH" -f "head_sha=$COMMIT" -f status=success -f per_page=1 \
+                  --jq '.workflow_runs[].id')"
+              if [[ -z "$run_id" ]]; then
+                  echo "::error::No successful production push CI for commit $COMMIT."
+                  exit 1
+              fi
+
+              # 只重跑部署时，产物仍来自原验证 job。按上传步骤定位，允许调用方自定义 job 名称。
+              attempt="$(gh api --paginate --slurp "$api/runs/$run_id/jobs?filter=all&per_page=100" |
+                  jq -r --arg additional "$ADDITIONAL_DIRECTORY" '
+                    def uploaded($name): any(.steps[]?; .name == $name and .conclusion == "success");
+                    [.[].jobs[] | select(any(.steps[]?; .name == "Upload verified Web assets"))]
+                    | group_by(.run_attempt) | last // []
+                    | map(select(.conclusion == "success" and uploaded("Upload verified Web assets")))
+                    | select(length == 1) | .[0]
+                    | select($additional == "" or uploaded("Upload additional verified assets"))
+                    | .run_attempt')"
+              if [[ -z "$attempt" ]]; then
+                  echo "::error::CI run $run_id has no matching successful site verification."
+                  exit 1
+              fi
+
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              echo "suffix=$run_id-$attempt" >> "$GITHUB_OUTPUT"
+
+        - name: Download Web assets
+          uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+          with:
+              github-token: ${{ github.token }}
+              run-id: ${{ steps.assets.outputs.run_id }}
+              name: web-${{ steps.assets.outputs.suffix }}
+              path: ${{ inputs.web-directory }}
+
+        - name: Download additional assets
+          if: inputs.additional-directory != ''
+          uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+          with:
+              github-token: ${{ github.token }}
+              run-id: ${{ steps.assets.outputs.run_id }}
+              name: additional-${{ steps.assets.outputs.suffix }}
+              path: ${{ inputs.additional-directory }}

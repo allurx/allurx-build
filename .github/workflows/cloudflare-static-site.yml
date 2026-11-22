@@ -104,6 +104,7 @@ jobs:
               run: npm run deploy -- --dry-run --assets "$ASSET_DIRECTORY"
 
             # 仅生产分支的 push 或显式派发会发布，PR 和其他分支只验证。
+            # 配套下载 action 通过两个上传步骤的名称识别生成产物的验证尝试。
             - name: Upload verified Web assets
               if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_type == 'branch' && github.ref_name == inputs.production-branch
               id: web_artifact

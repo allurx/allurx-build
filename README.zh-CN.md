@@ -11,7 +11,7 @@ Allurx 项目的共享构建配置、GitHub Actions、依赖更新策略和起�
 | 验证 Maven 工程                                | [maven-ci.yml](.github/workflows/maven-ci.yml)，执行项目的 `clean verify`                                                                                           |
 | 验证 Node.js 工程                              | [Node 接入说明](docs/node.md)与 [node-ci.yml](.github/workflows/node-ci.yml)                                                                                        |
 | 发布 Maven 或 npm 制品                         | [maven-central-publish.yml](.github/workflows/maven-central-publish.yml)、[npm-publish.yml](.github/workflows/npm-publish.yml)，见[发布指南](docs/release-guide.md) |
-| 部署 Cloudflare 静态站点                       | [cloudflare-static-site.yml](.github/workflows/cloudflare-static-site.yml)，见[部署说明](docs/cloudflare-static-site.md)                                            |
+| 部署 Cloudflare 静态站点并复用已验证产物       | [cloudflare-static-site.yml](.github/workflows/cloudflare-static-site.yml)，见[部署说明](docs/cloudflare-static-site.md)                                            |
 | 定期更新依赖                                   | 根 [Renovate preset](default.json)，见[依赖更新指南](docs/dependency-updates.md)                                                                                    |
 | 新建工程                                       | [项目模板](templates/README.md)                                                                                                                                     |
 
