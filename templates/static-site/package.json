@@ -26,7 +26,7 @@
         "jiti": "2.7.0",
         "prettier": "3.9.10",
         "typescript": "6.0.3",
-        "vite": "8.3.4",
+        "vite": "8.3.8",
         "wrangler": "4.151.1"
     },
     "prettier": "@allurx/js-config/prettier"
